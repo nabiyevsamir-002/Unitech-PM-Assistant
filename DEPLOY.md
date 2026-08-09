@@ -195,6 +195,55 @@ docker stats            # RAM/CPU (7B model RAM-ını izlə)
 
 ---
 
+## D hissə — GitHub Actions CI/CD (avtomatik deploy)
+
+Hər `git push origin main` → GitHub Actions serverə SSH ilə qoşulur, kodu **rsync** edir və stack-i yenidən build/restart edir (Prisma migration-ları `migrate` servisi ilə avtomatik tətbiq olunur). Workflow: `.github/workflows/deploy.yml`. Manual alternativ hər zaman qalır: `./scripts/deploy.sh` (SSH alias ilə).
+
+### D1. CI üçün AYRICA deploy açarı yarat (lokal Mac)
+Şəxsi SSH açarını istifadə etmə — CI üçün ayrıca, parolsuz açar:
+```bash
+ssh-keygen -t ed25519 -N "" -f ~/.ssh/unitech_ci_deploy -C "github-actions-deploy"
+```
+İki fayl: `unitech_ci_deploy` (private → GitHub secret-ə) + `unitech_ci_deploy.pub` (public → serverə).
+
+### D2. Public açarı droplet-ə əlavə et
+```bash
+ssh-copy-id -i ~/.ssh/unitech_ci_deploy.pub samir@DROPLET_IP
+# yoxla:
+ssh -i ~/.ssh/unitech_ci_deploy samir@DROPLET_IP 'echo ok'
+```
+
+### D3. Private GitHub repo yarat + push
+`gh` CLI ilə:
+```bash
+gh repo create unitech-pm-assistant --private --source=. --remote=origin --push
+```
+və ya əl ilə (github.com-da boş **private** repo aç, sonra):
+```bash
+git remote add origin git@github.com:SƏNİN_ADIN/unitech-pm-assistant.git
+git push -u origin main
+```
+
+### D4. Repo secret-ləri (GitHub → Settings → Secrets and variables → Actions)
+| Secret | Dəyər |
+|---|---|
+| `DEPLOY_SSH_KEY` | `cat ~/.ssh/unitech_ci_deploy` — private açarın TAM məzmunu |
+| `DEPLOY_HOST` | droplet IP və ya `unitech-pm-assistant.duckdns.org` |
+| `DEPLOY_USER` | server user-i (məs. `samir`) |
+| `DEPLOY_PATH` | serverdə layihə yolu (məs. `/home/samir/unitech-pm`) |
+
+### D5. Test et
+```bash
+git commit --allow-empty -m "ci: trigger deploy"
+git push
+```
+GitHub → **Actions** tab → "Deploy to production" işini izlə (yaşıl = uğur; sonda `/api/health` yoxlanır).
+
+> **Sirr təhlükəsizliyi:** `.env` və `.env.docker` `.gitignore`-dadır → GitHub-a getmir. Serverdəki `.env.docker` toxunulmur (rsync onu istisna edir). Yalnız `*.example` şablonları commit olunur.
+> **Gələcək təkmilləşdirmə (opsional):** image-i CI-də build edib GHCR-ə push → droplet-də yalnız `pull` (daha sürətli restart, serverdə build yükü olmur).
+
+---
+
 ## Nasazlıqların aradan qaldırılması
 | Simptom | Yoxla |
 |---|---|
