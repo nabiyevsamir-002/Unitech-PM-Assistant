@@ -72,6 +72,16 @@ export function endOfTodayBaku(): Date {
   return new Date(start.getTime() + 24 * 60 * 60 * 1000 - 1);
 }
 
+/** Today's date in Baku time as a yyyy-mm-dd string (for AI grounding). */
+export function todayBakuISO(): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+}
+
 /** Relative-ish helpers for tasks. */
 export function isOverdue(dueDate: Date | string | null | undefined): boolean {
   if (!dueDate) return false;

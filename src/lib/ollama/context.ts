@@ -1,5 +1,9 @@
 import { prisma } from "@/lib/prisma";
-import { isOverdue, isDueToday } from "@/lib/format";
+import { isOverdue, isDueToday, todayBakuISO } from "@/lib/format";
+
+// Cap the long open-task dump so the grounding snapshot stays small enough to
+// fit the model's context window (num_ctx) and keep prompt-eval fast on CPU.
+const MAX_OPEN_TASKS_LISTED = 40;
 
 export type AiContext = {
   snapshot: string;
@@ -36,7 +40,7 @@ export async function buildAiContext(): Promise<AiContext> {
   const dueToday = tasks.filter((t) => t.status !== "DONE" && isDueToday(t.dueDate));
 
   const lines: string[] = [];
-  lines.push("=== CURRENT PROJECT DATA (today is 2026-08-06, Baku time) ===");
+  lines.push(`=== CURRENT PROJECT DATA (today is ${todayBakuISO()}, Baku time) ===`);
 
   lines.push("\nPROJECTS:");
   for (const p of projects) {
@@ -71,10 +75,14 @@ export async function buildAiContext(): Promise<AiContext> {
   }
 
   lines.push("\nALL OPEN TASKS (title | project | assignee | status | due):");
-  for (const t of tasks.filter((x) => x.status !== "DONE")) {
+  const openTasks = tasks.filter((x) => x.status !== "DONE");
+  for (const t of openTasks.slice(0, MAX_OPEN_TASKS_LISTED)) {
     lines.push(
       `- ${t.title} | ${t.project.name} | ${t.assignee?.name ?? "unassigned"} | ${t.status} | ${iso(t.dueDate)}`,
     );
+  }
+  if (openTasks.length > MAX_OPEN_TASKS_LISTED) {
+    lines.push(`- (+${openTasks.length - MAX_OPEN_TASKS_LISTED} more open tasks not listed)`);
   }
 
   return {

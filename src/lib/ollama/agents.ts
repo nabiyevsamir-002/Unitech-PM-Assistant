@@ -2,6 +2,18 @@ import { ollama, OLLAMA_MODEL, type ChatMessage } from "./client";
 import { DECISION_SCHEMA, applyDecision } from "./tools";
 import { buildAiContext, type AiContext } from "./context";
 
+// Keep the model resident in RAM between requests so back-to-back chat turns
+// don't pay a ~30s cold reload on a CPU host. `-1` = never unload; override with
+// OLLAMA_KEEP_ALIVE (e.g. "15m") if the box is memory-constrained.
+const KEEP_ALIVE: string | number = process.env.OLLAMA_KEEP_ALIVE ?? -1;
+
+// Explicit context window. Ollama's small default (2048) silently truncates the
+// grounding snapshot + chat history → the model loses project data and answers
+// wrong. 4096 fits our snapshot comfortably; raise via OLLAMA_NUM_CTX on a
+// bigger host. (KV-cache cost is modest and prompt-eval time tracks actual
+// tokens, not this ceiling.)
+const NUM_CTX = Number(process.env.OLLAMA_NUM_CTX ?? 4096);
+
 // Prompt for the DECISION step. English (more reliable for a local model).
 // Uses constrained JSON output — never executes anything itself.
 function decisionPrompt(snapshot: string): string {
@@ -26,7 +38,7 @@ function answerSystemPrompt(snapshot: string, docContext = ""): string {
   const docNote = docContext
     ? "\nSome COMPANY DOCUMENTS are provided below. When the question relates to them, base your answer on those documents. If they don't cover it, use the project data or say you don't have that information."
     : "";
-  return `You are the UniTech Development project-management assistant. Answer the user ONLY in Azerbaijani, concise, friendly, plain business language. Base every fact strictly on the DATA below (it is already correct — do not recompute dates). Never invent tasks, people or projects. Never mention tools, JSON, functions or internal steps. Do not use English words.${docNote}
+  return `You are the UniTech Development project-management assistant. Answer the user ONLY in Azerbaijani, concise, friendly, plain business language. Keep it SHORT: at most 4-5 sentences (use a short bullet list only if it genuinely helps), answer only what was asked, and stop — do not pad or repeat. Base every fact strictly on the DATA below (it is already correct — do not recompute dates). Never invent tasks, people or projects. Never mention tools, JSON, functions or internal steps. Do not use English words.${docNote}
 
 ${snapshot}${docContext}`;
 }
@@ -74,10 +86,11 @@ export async function planPhase(
     const res = await ollama.chat({
       model: OLLAMA_MODEL,
       messages,
+      keep_alive: KEEP_ALIVE,
       // Constrained JSON output — reliable structured decision on a local model.
       format: DECISION_SCHEMA as unknown as Parameters<typeof ollama.chat>[0]["format"],
       stream: false,
-      options: { temperature: 0.1, num_predict: 256 },
+      options: { temperature: 0.1, num_predict: 256, num_ctx: NUM_CTX },
     });
 
     const decision = JSON.parse(res.message?.content ?? "{}");
@@ -124,8 +137,9 @@ export async function* finalAnswerStream(
     const stream = await ollama.chat({
       model: OLLAMA_MODEL,
       messages,
+      keep_alive: KEEP_ALIVE,
       stream: true,
-      options: { temperature: 0.4, num_predict: 500 },
+      options: { temperature: 0.4, num_predict: 300, num_ctx: NUM_CTX },
     });
     for await (const chunk of stream) {
       const piece = chunk.message?.content ?? "";
@@ -155,8 +169,9 @@ export async function* reportStream(): AsyncGenerator<string> {
     const stream = await ollama.chat({
       model: OLLAMA_MODEL,
       messages: reportMessages(ctx.snapshot),
+      keep_alive: KEEP_ALIVE,
       stream: true,
-      options: { temperature: 0.3 },
+      options: { temperature: 0.3, num_ctx: NUM_CTX },
     });
     for await (const chunk of stream) {
       const piece = chunk.message?.content ?? "";
@@ -179,8 +194,9 @@ export async function generateReportText(snapshot?: string): Promise<string | nu
     const res = await ollama.chat({
       model: OLLAMA_MODEL,
       messages: reportMessages(snap),
+      keep_alive: KEEP_ALIVE,
       stream: false,
-      options: { temperature: 0.3 },
+      options: { temperature: 0.3, num_ctx: NUM_CTX },
     });
     const text = res.message?.content?.trim() ?? "";
     return text.length > 0 ? text : null;
