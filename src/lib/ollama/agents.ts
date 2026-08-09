@@ -5,7 +5,18 @@ import { buildAiContext, type AiContext } from "./context";
 // Keep the model resident in RAM between requests so back-to-back chat turns
 // don't pay a ~30s cold reload on a CPU host. `-1` = never unload; override with
 // OLLAMA_KEEP_ALIVE (e.g. "15m") if the box is memory-constrained.
-const KEEP_ALIVE: string | number = process.env.OLLAMA_KEEP_ALIVE ?? -1;
+//
+// Ollama's keep_alive accepts a NUMBER (seconds; -1 = forever) OR a duration
+// STRING with a unit ("15m"). A bare numeric string like "-1" (which is what an
+// env var / compose default yields) is NOT a valid Go duration and makes Ollama
+// reject the request ("missing unit in duration") — so coerce numeric strings
+// back to numbers and leave real duration strings ("15m") as-is.
+function parseKeepAlive(v: string | undefined): string | number {
+  if (v == null || v === "") return -1;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : v;
+}
+const KEEP_ALIVE: string | number = parseKeepAlive(process.env.OLLAMA_KEEP_ALIVE);
 
 // Explicit context window. Ollama's small default (2048) silently truncates the
 // grounding snapshot + chat history → the model loses project data and answers
