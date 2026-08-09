@@ -11,6 +11,11 @@ export default async function LoginPage({
 }) {
   const { error } = await searchParams;
   return (
-    <LoginForm googleEnabled={isGoogleConfigured()} oauthError={error ?? null} />
+    <LoginForm
+      googleEnabled={isGoogleConfigured()}
+      oauthError={error ?? null}
+      // Plaintext demo logins must never appear on the public production page.
+      showDemo={process.env.NODE_ENV !== "production"}
+    />
   );
 }

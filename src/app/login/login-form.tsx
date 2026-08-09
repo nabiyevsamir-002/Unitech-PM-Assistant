@@ -52,9 +52,11 @@ function GoogleIcon({ className }: { className?: string }) {
 export function LoginForm({
   googleEnabled,
   oauthError,
+  showDemo,
 }: {
   googleEnabled: boolean;
   oauthError: string | null;
+  showDemo: boolean;
 }) {
   const { t } = useI18n();
   const router = useRouter();
@@ -203,32 +205,37 @@ export function LoginForm({
               </div>
             </form>
 
-            <div className="mt-6 border-t pt-4">
-              <p className="mb-2 text-xs font-medium text-muted-foreground">
-                {t.auth.demoAccounts} · şifrə: demo1234
-              </p>
-              <div className="grid gap-1.5">
-                {DEMO_ACCOUNTS.map((acc) => (
-                  <button
-                    key={acc.email}
-                    type="button"
-                    disabled={loading}
-                    onClick={() =>
-                      doLogin(undefined, {
-                        email: acc.email,
-                        password: "demo1234",
-                      })
-                    }
-                    className="flex items-center justify-between rounded-md border px-3 py-2 text-left text-sm transition-colors hover:bg-accent disabled:opacity-50"
-                  >
-                    <span>{acc.email}</span>
-                    <span className="text-xs text-muted-foreground">
-                      {(t.role as Record<string, string>)[acc.role]}
-                    </span>
-                  </button>
-                ))}
+            {/* Demo quick-login accounts expose plaintext credentials, so they
+                are shown ONLY in development — never on the public production
+                login page (see login/page.tsx: showDemo). */}
+            {showDemo && (
+              <div className="mt-6 border-t pt-4">
+                <p className="mb-2 text-xs font-medium text-muted-foreground">
+                  {t.auth.demoAccounts} · şifrə: demo1234
+                </p>
+                <div className="grid gap-1.5">
+                  {DEMO_ACCOUNTS.map((acc) => (
+                    <button
+                      key={acc.email}
+                      type="button"
+                      disabled={loading}
+                      onClick={() =>
+                        doLogin(undefined, {
+                          email: acc.email,
+                          password: "demo1234",
+                        })
+                      }
+                      className="flex items-center justify-between rounded-md border px-3 py-2 text-left text-sm transition-colors hover:bg-accent disabled:opacity-50"
+                    >
+                      <span>{acc.email}</span>
+                      <span className="text-xs text-muted-foreground">
+                        {(t.role as Record<string, string>)[acc.role]}
+                      </span>
+                    </button>
+                  ))}
+                </div>
               </div>
-            </div>
+            )}
           </CardContent>
         </Card>
       </div>
