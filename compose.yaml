@@ -89,6 +89,10 @@ services:
       DATABASE_URL: postgresql://unitech:${POSTGRES_PASSWORD:-unitech_dev_pw}@postgres:5432/unitech_pm?schema=public
       AUTH_SECRET: ${AUTH_SECRET:?AUTH_SECRET is required — set it in .env.docker}
       AUTH_TRUST_HOST: "true"
+      # Public origin, e.g. https://your-domain. REQUIRED behind a reverse proxy
+      # so next-auth builds redirects (sign-out, callbacks) against the real
+      # domain instead of the container's internal 0.0.0.0:3000 address.
+      AUTH_URL: ${AUTH_URL:-}
       OLLAMA_HOST: http://ollama:11434
       OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:7b}
       OLLAMA_EMBED_MODEL: ${OLLAMA_EMBED_MODEL:-nomic-embed-text}
