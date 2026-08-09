@@ -145,7 +145,9 @@ export async function* finalAnswerStream(
       const piece = chunk.message?.content ?? "";
       if (piece) yield piece;
     }
-  } catch {
+  } catch (e) {
+    // Surface the real cause in the container logs (was silently swallowed).
+    console.error("[ai] finalAnswerStream failed:", e instanceof Error ? e.message : e);
     yield "AI köməkçisi hazırda əlçatmazdır. Zəhmət olmasa bir azdan yenidən cəhd edin.";
   }
 }

@@ -62,7 +62,8 @@ export async function POST(req: Request) {
         for await (const chunk of finalAnswerStream(history, plan, docContext)) {
           controller.enqueue(encoder.encode(chunk));
         }
-      } catch {
+      } catch (e) {
+        console.error("[ai] chat stream failed:", e instanceof Error ? e.message : e);
         controller.enqueue(
           encoder.encode("AI köməkçisi hazırda əlçatmazdır."),
         );
