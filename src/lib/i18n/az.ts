@@ -132,6 +132,7 @@ export const az = {
     submitting: "Göndərilir…",
     mismatch: "Şifrələr uyğun gəlmir.",
     tooShort: "Şifrə ən azı 8 simvol olmalıdır.",
+    error: "Xəta baş verdi. Bir azdan yenidən cəhd edin.",
     approvalNote: "Hesabınız administrator təsdiqindən sonra aktiv olacaq.",
     backToLogin: "Girişə qayıt",
     haveAccount: "Artıq hesabınız var? Daxil olun",

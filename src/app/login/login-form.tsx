@@ -70,19 +70,25 @@ export function LoginForm({
     e?.preventDefault();
     setError(null);
     setLoading(true);
-    const res = await signIn("credentials", {
-      email: creds?.email ?? email,
-      password: creds?.password ?? password,
-      totp: creds ? "" : totp,
-      redirect: false,
-    });
-    setLoading(false);
-    if (res?.error) {
+    try {
+      const res = await signIn("credentials", {
+        email: creds?.email ?? email,
+        password: creds?.password ?? password,
+        totp: creds ? "" : totp,
+        redirect: false,
+      });
+      if (res?.error) {
+        setError(t.auth.invalidCredentials);
+        return;
+      }
+      router.push("/dashboard");
+      router.refresh();
+    } catch {
+      // Never leave the button stuck on "Signing in…" if signIn throws.
       setError(t.auth.invalidCredentials);
-      return;
+    } finally {
+      setLoading(false);
     }
-    router.push("/dashboard");
-    router.refresh();
   };
 
   return (

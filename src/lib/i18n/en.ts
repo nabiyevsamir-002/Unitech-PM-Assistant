@@ -132,6 +132,7 @@ export const en: Dictionary = {
     submitting: "Submitting…",
     mismatch: "Passwords do not match.",
     tooShort: "Password must be at least 8 characters.",
+    error: "Something went wrong. Please try again in a moment.",
     approvalNote: "Your account will become active after an administrator approves it.",
     backToLogin: "Back to sign in",
     haveAccount: "Already have an account? Sign in",

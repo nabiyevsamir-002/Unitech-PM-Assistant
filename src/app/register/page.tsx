@@ -45,14 +45,21 @@ export default function RegisterPage() {
       return;
     }
     setLoading(true);
-    const res = await registerUser({ name, email, password });
-    setLoading(false);
-    if (!res.ok) {
-      setError(res.message);
-      return;
+    try {
+      const res = await registerUser({ name, email, password });
+      if (!res.ok) {
+        setError(res.message);
+        return;
+      }
+      setNotice(res.message);
+      setStep("done");
+    } catch {
+      // A transient server error (e.g. mid-deploy) must NOT leave the button
+      // stuck on "Submitting…" forever — reset and show a retry message.
+      setError(rg.error);
+    } finally {
+      setLoading(false);
     }
-    setNotice(res.message);
-    setStep("done");
   };
 
   return (
