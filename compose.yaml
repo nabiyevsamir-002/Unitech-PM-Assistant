@@ -1,0 +1,133 @@
+# UniTech PM AI Assistant — full production stack (track 5c).
+# app + PostgreSQL + Ollama in one Compose project. Sized for a small team (<=10).
+#
+# Usage:
+#   cp .env.docker.example .env.docker      # then edit secrets
+#   docker compose --env-file .env.docker up -d --build
+#   # first boot: models pull automatically (ollama-init); seed once if you want demo data:
+#   docker compose --env-file .env.docker run --rm migrate npm run db:seed
+#
+# The `migrate` service applies schema migrations before `app` starts.
+# The `ollama-init` service pulls the chat + embedding models on first boot.
+
+name: unitech-pm
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: unitech
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-unitech_dev_pw}
+      POSTGRES_DB: unitech_pm
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U unitech -d unitech_pm"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    # Not published to the host by default (internal-only). Uncomment to inspect:
+    # ports:
+    #   - "5433:5432"
+
+  ollama:
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    volumes:
+      - ollama:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    # GPU: on a GPU host, add a deploy.resources.reservations.devices block or
+    # `runtime: nvidia` here to give Ollama the accelerator (see ROADMAP §5c).
+
+  # One-shot: pull the chat + embedding models into the ollama volume on first boot.
+  ollama-init:
+    image: ollama/ollama:latest
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >
+        ollama pull ${OLLAMA_MODEL:-qwen2.5:7b} &&
+        ollama pull ${OLLAMA_EMBED_MODEL:-nomic-embed-text}
+    restart: "no"
+
+  # One-shot: apply Prisma migrations before the app comes up.
+  migrate:
+    build:
+      context: .
+      target: migrator
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://unitech:${POSTGRES_PASSWORD:-unitech_dev_pw}@postgres:5432/unitech_pm?schema=public
+    restart: "no"
+
+  app:
+    build:
+      context: .
+      target: runner
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      ollama:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://unitech:${POSTGRES_PASSWORD:-unitech_dev_pw}@postgres:5432/unitech_pm?schema=public
+      AUTH_SECRET: ${AUTH_SECRET:?AUTH_SECRET is required — set it in .env.docker}
+      AUTH_TRUST_HOST: "true"
+      OLLAMA_HOST: http://ollama:11434
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:7b}
+      OLLAMA_EMBED_MODEL: ${OLLAMA_EMBED_MODEL:-nomic-embed-text}
+      # Optional notifications (5d) — no-op if unset.
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      NOTIFY_EMAIL_TO: ${NOTIFY_EMAIL_TO:-}
+      # Optional OneDrive/Microsoft Graph Excel sync (5d) — no-op if unset.
+      MSGRAPH_TENANT_ID: ${MSGRAPH_TENANT_ID:-}
+      MSGRAPH_CLIENT_ID: ${MSGRAPH_CLIENT_ID:-}
+      MSGRAPH_CLIENT_SECRET: ${MSGRAPH_CLIENT_SECRET:-}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+    # Bound to loopback only: reachable at http://localhost:3000 for local testing,
+    # but NOT internet-exposed on a server (Docker can bypass ufw). In production the
+    # `caddy` service (compose.prod.yaml) is the public entrypoint and reaches the
+    # app over the internal Docker network as `app:3000` regardless of this binding.
+    ports:
+      - "127.0.0.1:${APP_PORT:-3000}:3000"
+    volumes:
+      - uploads:/app/uploads
+      - excel-backups:/app/sample-data/backups
+    healthcheck:
+      # Node 24 has global fetch; hits the public /api/health probe (checks DB).
+      test:
+        - "CMD-SHELL"
+        - "node -e \"fetch('http://localhost:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+volumes:
+  pgdata:
+  ollama:
+  uploads:
+  excel-backups:

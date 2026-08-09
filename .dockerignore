@@ -1,0 +1,30 @@
+# Build artifacts / deps (reinstalled + rebuilt inside the image)
+node_modules
+.next
+out
+build
+
+# VCS / IDE / OS
+.git
+.idea
+.vscode
+.DS_Store
+
+# Env & secrets — the container gets its config from compose, never from a baked .env
+.env
+.env.*
+
+# SQLite leftovers (we run on Postgres now)
+prisma/dev.db
+prisma/*.db
+
+# Local runtime data (persisted via named volumes instead)
+uploads
+sample-data/backups
+
+# Misc
+*.tsbuildinfo
+npm-debug.log*
+ROADMAP.md
+README.md
+.claude

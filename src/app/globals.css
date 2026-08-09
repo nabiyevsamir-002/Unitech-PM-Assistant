@@ -1,0 +1,183 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  --radius: 0.65rem;
+
+  --background: oklch(0.99 0.002 250);
+  --foreground: oklch(0.18 0.02 260);
+
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.18 0.02 260);
+
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.18 0.02 260);
+
+  --primary: oklch(0.52 0.19 262);
+  --primary-foreground: oklch(0.98 0.01 262);
+
+  --secondary: oklch(0.96 0.01 260);
+  --secondary-foreground: oklch(0.26 0.02 260);
+
+  --muted: oklch(0.96 0.005 260);
+  --muted-foreground: oklch(0.52 0.02 260);
+
+  --accent: oklch(0.95 0.02 262);
+  --accent-foreground: oklch(0.28 0.05 262);
+
+  --destructive: oklch(0.58 0.22 25);
+  --destructive-foreground: oklch(0.98 0.01 25);
+
+  --success: oklch(0.62 0.16 150);
+  --success-foreground: oklch(0.99 0.01 150);
+
+  --warning: oklch(0.75 0.15 75);
+  --warning-foreground: oklch(0.28 0.06 75);
+
+  --border: oklch(0.91 0.008 260);
+  --input: oklch(0.91 0.008 260);
+  --ring: oklch(0.52 0.19 262);
+
+  /* status colors for kanban / priorities */
+  --status-todo: oklch(0.62 0.02 260);
+  --status-progress: oklch(0.58 0.16 250);
+  --status-review: oklch(0.72 0.15 75);
+  --status-done: oklch(0.62 0.16 150);
+
+  --sidebar: oklch(0.985 0.003 260);
+  --sidebar-foreground: oklch(0.22 0.02 260);
+  --sidebar-primary: oklch(0.52 0.19 262);
+  --sidebar-primary-foreground: oklch(0.98 0.01 262);
+  --sidebar-accent: oklch(0.95 0.015 262);
+  --sidebar-accent-foreground: oklch(0.28 0.05 262);
+  --sidebar-border: oklch(0.91 0.008 260);
+  --sidebar-ring: oklch(0.52 0.19 262);
+}
+
+.dark {
+  --background: oklch(0.16 0.012 260);
+  --foreground: oklch(0.95 0.008 260);
+
+  --card: oklch(0.2 0.014 260);
+  --card-foreground: oklch(0.95 0.008 260);
+
+  --popover: oklch(0.2 0.014 260);
+  --popover-foreground: oklch(0.95 0.008 260);
+
+  --primary: oklch(0.66 0.17 264);
+  --primary-foreground: oklch(0.16 0.02 264);
+
+  --secondary: oklch(0.27 0.015 260);
+  --secondary-foreground: oklch(0.95 0.008 260);
+
+  --muted: oklch(0.26 0.012 260);
+  --muted-foreground: oklch(0.68 0.015 260);
+
+  --accent: oklch(0.3 0.03 264);
+  --accent-foreground: oklch(0.92 0.02 264);
+
+  --destructive: oklch(0.64 0.2 25);
+  --destructive-foreground: oklch(0.98 0.01 25);
+
+  --success: oklch(0.68 0.15 150);
+  --success-foreground: oklch(0.16 0.02 150);
+
+  --warning: oklch(0.78 0.14 75);
+  --warning-foreground: oklch(0.2 0.04 75);
+
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 14%);
+  --ring: oklch(0.66 0.17 264);
+
+  --status-todo: oklch(0.68 0.02 260);
+  --status-progress: oklch(0.66 0.16 255);
+  --status-review: oklch(0.78 0.14 75);
+  --status-done: oklch(0.68 0.15 150);
+
+  --sidebar: oklch(0.18 0.014 260);
+  --sidebar-foreground: oklch(0.92 0.008 260);
+  --sidebar-primary: oklch(0.66 0.17 264);
+  --sidebar-primary-foreground: oklch(0.16 0.02 264);
+  --sidebar-accent: oklch(0.3 0.03 264);
+  --sidebar-accent-foreground: oklch(0.92 0.02 264);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-ring: oklch(0.66 0.17 264);
+}
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --color-status-todo: var(--status-todo);
+  --color-status-progress: var(--status-progress);
+  --color-status-review: var(--status-review);
+  --color-status-done: var(--status-done);
+
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+}
+
+* {
+  border-color: var(--border);
+}
+
+html {
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* thin scrollbars for the board/columns */
+.thin-scrollbar::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.thin-scrollbar::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 9999px;
+}
+.thin-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}

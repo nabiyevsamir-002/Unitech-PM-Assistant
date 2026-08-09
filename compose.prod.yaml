@@ -1,0 +1,27 @@
+# Production override (track 5c) — adds a Caddy reverse proxy for public HTTPS.
+# Use ALONGSIDE compose.yaml:
+#   docker compose --env-file .env.docker -f compose.yaml -f compose.prod.yaml up -d --build
+#
+# Caddy is the only internet-facing service (ports 80/443). The app stays on the
+# internal network (compose.yaml already binds its host port to loopback only).
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - app
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp" # HTTP/3
+    environment:
+      DOMAIN: ${DOMAIN:-localhost}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data # Let's Encrypt certs — persist so renewals survive restarts
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:

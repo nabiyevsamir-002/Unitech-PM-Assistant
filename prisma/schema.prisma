@@ -1,0 +1,217 @@
+// UniTech PM AI Assistant — data model
+// DB: PostgreSQL (migrated from SQLite in track 5c). See ROADMAP.md §5c.
+// Note: "enum" fields are kept as String (allowed values enforced in app code,
+// see src/lib/constants.ts) and list/JSON fields are kept as JSON-encoded String
+// (parsed in src/lib/data.ts). This encoding was carried over unchanged from the
+// SQLite era so the provider swap stays behaviour-preserving and low-risk;
+// converting them to native Postgres Json/arrays is an optional future polish.
+
+generator client {
+  provider      = "prisma-client-js"
+  // "native" covers local dev + same-arch container builds; the explicit Debian
+  // target keeps the generated engine portable to amd64 Linux containers (the
+  // Docker runner base is node:*-bookworm-slim = Debian 12 / OpenSSL 3.0).
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                 String    @id @default(cuid())
+  name               String
+  email              String    @unique
+  passwordHash       String
+  role               String    @default("MEMBER") // OWNER | DEPUTY_OWNER | PM | MEMBER
+  weeklyCapacityHours Int      @default(40)
+  skills             String    @default("[]") // JSON array of strings
+  avatar             String?
+  isActive           Boolean   @default(true)
+  // Self-registered accounts wait here: created with isActive=false +
+  // pendingApproval=true; an admin approve flips both. Distinguishes an
+  // awaiting-approval signup from an offboarded (deactivated) member.
+  pendingApproval    Boolean   @default(false)
+  unavailableFrom    DateTime?
+  unavailableTo      DateTime?
+  totpSecret         String?   // base32 TOTP secret (set at enrollment; null = no 2FA)
+  totpEnabled        Boolean   @default(false) // true only after a code is confirmed
+  createdAt          DateTime  @default(now())
+
+  assignedTasks   Task[]      @relation("TaskAssignee")
+  decidedApprovals Approval[] @relation("ApprovalDecider")
+  timeLogs        TimeLog[]
+
+  @@index([role])
+}
+
+model Client {
+  id          String    @id @default(cuid())
+  name        String
+  contactName String?
+  contactInfo String?
+  createdAt   DateTime  @default(now())
+
+  projects Project[]
+}
+
+model Project {
+  id        String    @id @default(cuid())
+  name      String
+  clientId  String?
+  status    String    @default("ACTIVE") // ACTIVE | ON_HOLD | COMPLETED | ARCHIVED
+  startDate DateTime?
+  dueDate   DateTime?
+  currency  String    @default("AZN")
+  color     String?
+  createdAt DateTime  @default(now())
+
+  client      Client?      @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  tasks       Task[]
+  excelSource ExcelSource?
+  attachments Attachment[]
+
+  @@index([status])
+}
+
+model Task {
+  id            String    @id @default(cuid())
+  projectId     String
+  title         String
+  description   String?
+  status        String    @default("TODO") // TODO | IN_PROGRESS | REVIEW | DONE
+  assigneeId    String?
+  priority      String    @default("MEDIUM") // LOW | MEDIUM | HIGH | URGENT
+  startDate     DateTime?
+  dueDate       DateTime?
+  parentTaskId  String?
+  orderIndex    Int       @default(0)
+  estimatedHours Float?
+  loggedHours   Float?
+  dependsOnTaskIds String @default("[]") // JSON array of task ids
+  customFields  String    @default("{}")  // JSON object
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  project     Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  assignee    User?        @relation("TaskAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  parentTask  Task?        @relation("Subtasks", fields: [parentTaskId], references: [id], onDelete: Cascade)
+  subtasks    Task[]       @relation("Subtasks")
+  timeLogs    TimeLog[]
+  attachments Attachment[]
+
+  @@index([projectId, status])
+  @@index([assigneeId])
+}
+
+model Approval {
+  id             String    @id @default(cuid())
+  type           String    // CREATE_TASK | ASSIGN_TASK | CHANGE_DEADLINE | SEND_MESSAGE | EXCEL_WRITE | ...
+  proposedByAgent String   // Planning | Monitoring | Reporting | Communication | Data
+  title          String    // short human-readable summary (Azerbaijani)
+  summary        String?   // longer description
+  payload        String    @default("{}") // JSON: the proposed action / diff
+  status         String    @default("PENDING") // PENDING | APPROVED | REJECTED
+  requestedAt    DateTime  @default(now())
+  decidedById    String?
+  decidedAt      DateTime?
+  reason         String?
+
+  decidedBy User? @relation("ApprovalDecider", fields: [decidedById], references: [id], onDelete: SetNull)
+
+  @@index([status])
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  actor     String   // "user:<id>" or "agent:<name>"
+  action    String
+  entity    String    // "task:<id>", "project:<id>", ...
+  before    String?   // JSON snapshot
+  after     String?   // JSON snapshot
+  timestamp DateTime  @default(now())
+
+  @@index([timestamp])
+  @@index([entity])
+}
+
+model ExcelSource {
+  id           String   @id @default(cuid())
+  projectId    String   @unique
+  fileLocation String
+  anchors      String   @default("{}") // JSON: field -> { sheet, cell }
+  confirmed    Boolean  @default(false)
+  lastSyncedAt DateTime?
+  createdAt    DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+}
+
+model TimeLog {
+  id     String   @id @default(cuid())
+  taskId String
+  userId String
+  hours  Float
+  date   DateTime @default(now())
+  note   String?
+
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([taskId])
+}
+
+model Attachment {
+  id          String   @id @default(cuid())
+  taskId      String?
+  projectId   String?
+  fileName    String
+  fileType    String?
+  storagePath String
+  createdAt   DateTime @default(now())
+
+  task    Task?    @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  project Project? @relation(fields: [projectId], references: [id], onDelete: Cascade)
+}
+
+// RAG: company documents chunked + embedded for grounded Q&A (local Ollama
+// embeddings). Vectors stored as JSON-encoded String (SQLite has no vector
+// type); cosine similarity is computed in app code — fine at this scale.
+model Document {
+  id        String   @id @default(cuid())
+  title     String
+  source    String?  // e.g. "paste", filename
+  createdAt DateTime @default(now())
+
+  chunks DocumentChunk[]
+}
+
+model DocumentChunk {
+  id         String   @id @default(cuid())
+  documentId String
+  index      Int
+  content    String
+  embedding  String   // JSON array of floats
+  createdAt  DateTime @default(now())
+
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@index([documentId])
+}
+
+// Email-OTP password reset (track 5d). One live record per user (old ones are
+// deleted on a new request). The 6-digit code is stored ONLY as a bcrypt hash,
+// so a DB leak never exposes usable codes; short expiry + an attempt cap bound
+// brute force of the small code space.
+model PasswordReset {
+  id        String    @id @default(cuid())
+  userId    String
+  codeHash  String    // bcrypt hash of the 6-digit code
+  expiresAt DateTime
+  attempts  Int       @default(0)
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+}

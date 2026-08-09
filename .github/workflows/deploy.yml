@@ -1,0 +1,69 @@
+name: Deploy to production
+
+# Every push to main (or a manual run) ships the code to the droplet: rsync the
+# tree up, then rebuild + restart the Docker stack there (Prisma migrations
+# auto-apply via the `migrate` service, which `app` depends on).
+#
+# Required repo secrets (Settings → Secrets and variables → Actions):
+#   DEPLOY_SSH_KEY   private key of a CI-only deploy keypair (see DEPLOY.md §D)
+#   DEPLOY_HOST      droplet IP or unitech-pm-assistant.duckdns.org
+#   DEPLOY_USER      server user (e.g. samir)
+#   DEPLOY_PATH      project dir on the server (e.g. /home/samir/unitech-pm)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Never run two deploys at once; let an in-flight deploy finish rather than
+# cancelling it half-way through a rebuild.
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure SSH
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          ssh-keyscan -H "${{ secrets.DEPLOY_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Rsync code to server
+        run: |
+          rsync -az --delete \
+            --exclude '.git' \
+            --exclude 'node_modules' \
+            --exclude '.next' \
+            --exclude 'uploads' \
+            --exclude 'backups' \
+            --exclude 'sample-data/backups' \
+            --exclude '.env' \
+            --exclude '.env.docker' \
+            -e "ssh -i ~/.ssh/id_deploy -o StrictHostKeyChecking=yes" \
+            ./ "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:${{ secrets.DEPLOY_PATH }}/"
+
+      - name: Rebuild + restart stack (migrations auto-apply)
+        run: |
+          ssh -i ~/.ssh/id_deploy -o StrictHostKeyChecking=yes \
+            "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" \
+            "cd '${{ secrets.DEPLOY_PATH }}' && docker compose --env-file .env.docker -f compose.yaml -f compose.prod.yaml up -d --build"
+
+      - name: Health check
+        run: |
+          for _ in $(seq 1 24); do
+            if curl -fsS "https://unitech-pm-assistant.duckdns.org/api/health" >/dev/null; then
+              echo "✓ healthy: $(curl -fsS https://unitech-pm-assistant.duckdns.org/api/health)"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "✗ health check did not pass in time"
+          exit 1

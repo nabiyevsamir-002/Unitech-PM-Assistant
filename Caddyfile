@@ -1,0 +1,15 @@
+# UniTech PM AI Assistant — Caddy reverse proxy (track 5c, production HTTPS).
+# Caddy terminates TLS and proxies to the app container over the internal network.
+#
+# Set DOMAIN in .env.docker to your domain (its DNS A record must point at the
+# droplet's public IP) — Caddy then provisions a Let's Encrypt certificate
+# automatically. If DOMAIN is left as "localhost", Caddy serves a local self-signed
+# cert (fine for a quick test, browsers will warn).
+
+{$DOMAIN:localhost} {
+	encode zstd gzip
+	reverse_proxy app:3000 {
+		# Preserve the real client IP so the app's login rate-limiter (per-IP) works.
+		header_up X-Real-IP {remote_host}
+	}
+}
