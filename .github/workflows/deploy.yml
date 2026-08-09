@@ -32,8 +32,15 @@ jobs:
       - name: Configure SSH
         run: |
           mkdir -p ~/.ssh
-          printf '%s\n' "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/id_deploy
+          # DEPLOY_SSH_KEY is stored BASE64-ENCODED so copy/paste can't mangle the
+          # private key's newlines (that corruption is what causes OpenSSH's
+          # "error in libcrypto"). Create the secret with:
+          #   base64 -i ~/.ssh/unitech_ci_deploy | pbcopy      (macOS)
+          echo "${{ secrets.DEPLOY_SSH_KEY }}" | base64 -d > ~/.ssh/id_deploy
           chmod 600 ~/.ssh/id_deploy
+          # Fail fast with a clear message if the secret is wrong/not a valid key.
+          ssh-keygen -y -f ~/.ssh/id_deploy > /dev/null \
+            || { echo "::error::DEPLOY_SSH_KEY is not a valid base64-encoded OpenSSH private key"; exit 1; }
           ssh-keyscan -H "${{ secrets.DEPLOY_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
 
       - name: Rsync code to server
