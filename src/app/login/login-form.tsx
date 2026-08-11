@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { signIn } from "next-auth/react";
 import { Sparkles, LogIn } from "lucide-react";
@@ -62,7 +61,6 @@ export function LoginForm({
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [totp, setTotp] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -74,7 +72,7 @@ export function LoginForm({
       const res = await signIn("credentials", {
         email: creds?.email ?? email,
         password: creds?.password ?? password,
-        totp: creds ? "" : totp,
+        totp: "",
         redirect: false,
       });
       if (res?.error) {
@@ -164,20 +162,6 @@ export function LoginForm({
                   required
                 />
               </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="totp">{t.auth.totpCode}</Label>
-                <Input
-                  id="totp"
-                  type="text"
-                  inputMode="numeric"
-                  autoComplete="one-time-code"
-                  value={totp}
-                  onChange={(e) => setTotp(e.target.value.replace(/\D/g, "").slice(0, 6))}
-                  placeholder="123456"
-                />
-                <p className="text-xs text-muted-foreground">{t.auth.totpHint}</p>
-              </div>
-
               {error && (
                 <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
                   {error}
@@ -194,21 +178,6 @@ export function LoginForm({
                   </>
                 )}
               </Button>
-
-              <div className="flex items-center justify-between text-xs">
-                <Link
-                  href="/register"
-                  className="font-medium text-primary hover:underline"
-                >
-                  {t.auth.createAccount}
-                </Link>
-                <Link
-                  href="/reset-password"
-                  className="text-muted-foreground hover:text-foreground"
-                >
-                  {t.auth.forgotPassword}
-                </Link>
-              </div>
             </form>
 
             {/* Demo quick-login accounts expose plaintext credentials, so they

@@ -11,12 +11,10 @@ export const authConfig = {
   callbacks: {
     authorized({ auth, request: { nextUrl } }) {
       const isLoggedIn = !!auth?.user;
-      // Public, pre-authentication pages: sign-in, self-registration, and the
-      // OTP password reset.
-      const isPublicAuthPage =
-        nextUrl.pathname.startsWith("/login") ||
-        nextUrl.pathname.startsWith("/register") ||
-        nextUrl.pathname.startsWith("/reset-password");
+      // Simplified 2-person setup: only the sign-in page is public. Self-
+      // registration and OTP password-reset are disabled — those routes now
+      // require a session, so unauthenticated hits redirect to /login.
+      const isPublicAuthPage = nextUrl.pathname.startsWith("/login");
 
       if (isPublicAuthPage) {
         if (isLoggedIn) {

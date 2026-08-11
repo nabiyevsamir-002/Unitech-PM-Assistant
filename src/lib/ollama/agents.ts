@@ -217,3 +217,30 @@ export async function generateReportText(snapshot?: string): Promise<string | nu
     return null;
   }
 }
+
+/**
+ * One-shot Azerbaijani PM analysis of an uploaded Excel task list. All numbers
+ * are computed by the caller and passed in `grounding`; the model only narrates.
+ * Returns "" if the model is unreachable so the page still shows the table.
+ */
+export async function excelInsights(grounding: string): Promise<string> {
+  try {
+    const res = await ollama.chat({
+      model: OLLAMA_MODEL,
+      keep_alive: KEEP_ALIVE,
+      stream: false,
+      options: { temperature: 0.3, num_ctx: NUM_CTX, num_predict: 400 },
+      messages: [
+        {
+          role: "system",
+          content:
+            "You are a project-management analyst for UniTech Development. Using ONLY the task data below, write a SHORT status analysis in AZERBAIJANI for the project manager. Use short bullet points covering: 1) ümumi vəziyyət, 2) gecikmiş və riskli tapşırıqlar, 3) komanda yükü (kim çox iş götürüb), 4) 2-3 qısa tövsiyə. Plain business language. Do not invent anything, do not recompute dates. Azerbaijani only, no English words.",
+        },
+        { role: "user", content: grounding },
+      ],
+    });
+    return res.message?.content?.trim() ?? "";
+  } catch {
+    return "";
+  }
+}

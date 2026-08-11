@@ -5,28 +5,14 @@ import { usePathname } from "next/navigation";
 import {
   LayoutDashboard,
   KanbanSquare,
-  FolderKanban,
   CheckCircle2,
-  BarChart3,
-  Settings,
   Sparkles,
-  GanttChartSquare,
-  History,
-  BookText,
+  FileSpreadsheet,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useI18n } from "@/components/providers/i18n-provider";
 
-type NavKey =
-  | "dashboard"
-  | "board"
-  | "timeline"
-  | "projects"
-  | "approvals"
-  | "reports"
-  | "documents"
-  | "activity"
-  | "settings";
+type NavKey = "dashboard" | "board" | "excel" | "approvals";
 
 type NavItem = {
   href: string;
@@ -45,21 +31,19 @@ export function SidebarNav({
   const pathname = usePathname();
   const { t } = useI18n();
 
+  // Simplified for a 2-person setup (PM + boss): only the daily-use screens.
+  // Other pages (timeline, projects, reports, documents, activity, settings)
+  // still exist and are reachable by URL, just hidden from the menu.
   const items: NavItem[] = [
     { href: "/dashboard", labelKey: "dashboard", icon: LayoutDashboard },
+    { href: "/excel", labelKey: "excel", icon: FileSpreadsheet },
     { href: "/board", labelKey: "board", icon: KanbanSquare },
-    { href: "/timeline", labelKey: "timeline", icon: GanttChartSquare },
-    { href: "/projects", labelKey: "projects", icon: FolderKanban },
     {
       href: "/approvals",
       labelKey: "approvals",
       icon: CheckCircle2,
       badge: pendingCount,
     },
-    { href: "/reports", labelKey: "reports", icon: BarChart3 },
-    { href: "/documents", labelKey: "documents", icon: BookText },
-    { href: "/activity", labelKey: "activity", icon: History },
-    { href: "/settings", labelKey: "settings", icon: Settings },
   ];
 
   return (
