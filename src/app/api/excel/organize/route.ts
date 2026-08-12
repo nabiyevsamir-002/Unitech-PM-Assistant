@@ -73,6 +73,7 @@ export async function POST(req: Request) {
       tsv: HEADERS.join("\t"),
       insights: "",
       stats: emptyStats,
+      tasks: [],
     });
   }
 
@@ -107,5 +108,6 @@ export async function POST(req: Request) {
 
   const insights = await excelInsights(lines.join("\n"));
 
-  return Response.json({ ok: true, empty: false, headers: HEADERS, rows, tsv, insights, stats });
+  // `tasks` (structured) lets the client offer "import as project" without re-upload.
+  return Response.json({ ok: true, empty: false, headers: HEADERS, rows, tsv, insights, stats, tasks });
 }

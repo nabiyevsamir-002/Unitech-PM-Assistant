@@ -2,7 +2,16 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { FileSpreadsheet, Building2, CalendarClock, Plus } from "lucide-react";
+import { useRouter } from "next/navigation";
+import {
+  FileSpreadsheet,
+  Building2,
+  CalendarClock,
+  Plus,
+  Trash2,
+  Loader2,
+} from "lucide-react";
+import { toast } from "sonner";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
@@ -10,6 +19,7 @@ import { StatusBadge } from "@/components/shared/badges";
 import { NewProjectDialog } from "@/components/projects/new-project-dialog";
 import { useI18n } from "@/components/providers/i18n-provider";
 import { formatDate } from "@/lib/format";
+import { deleteProject, clearAllData } from "@/app/actions/projects";
 import type { ClientDTO, ProjectDTO } from "@/lib/types";
 
 export function ProjectsView({
@@ -22,7 +32,42 @@ export function ProjectsView({
   canCreate: boolean;
 }) {
   const { t } = useI18n();
+  const router = useRouter();
   const [createOpen, setCreateOpen] = useState(false);
+  const [pendingId, setPendingId] = useState<string | null>(null);
+  const [clearing, setClearing] = useState(false);
+
+  const onDelete = async (e: React.MouseEvent, id: string, name: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!window.confirm(`«${name}» layihəsini və bütün tapşırıqlarını silmək istəyirsən? Bu geri qaytarıla bilməz.`)) {
+      return;
+    }
+    setPendingId(id);
+    const res = await deleteProject(id);
+    setPendingId(null);
+    if (res.ok) {
+      toast.success(res.message);
+      router.refresh();
+    } else {
+      toast.error(res.message);
+    }
+  };
+
+  const onClearAll = async () => {
+    if (!window.confirm("BÜTÜN layihələri, tapşırıqları və təsdiqləri silmək istəyirsən? İstifadəçilər qalacaq. Bu geri qaytarıla bilməz.")) {
+      return;
+    }
+    setClearing(true);
+    const res = await clearAllData();
+    setClearing(false);
+    if (res.ok) {
+      toast.success(res.message);
+      router.refresh();
+    } else {
+      toast.error(res.message);
+    }
+  };
 
   return (
     <div className="space-y-5">
@@ -34,10 +79,22 @@ export function ProjectsView({
           </p>
         </div>
         {canCreate && (
-          <Button onClick={() => setCreateOpen(true)}>
-            <Plus className="size-4" />
-            <span className="hidden sm:inline">{t.projects.newProject}</span>
-          </Button>
+          <div className="flex items-center gap-2">
+            {projects.length > 0 && (
+              <Button variant="outline" onClick={onClearAll} disabled={clearing}>
+                {clearing ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : (
+                  <Trash2 className="size-4" />
+                )}
+                <span className="hidden sm:inline">{t.projects.clearAll}</span>
+              </Button>
+            )}
+            <Button onClick={() => setCreateOpen(true)}>
+              <Plus className="size-4" />
+              <span className="hidden sm:inline">{t.projects.newProject}</span>
+            </Button>
+          </div>
         )}
       </div>
 
@@ -72,7 +129,25 @@ export function ProjectsView({
                         />
                         <h3 className="leading-tight font-semibold">{p.name}</h3>
                       </div>
-                      <StatusBadge status={p.status} />
+                      <div className="flex items-center gap-1.5">
+                        <StatusBadge status={p.status} />
+                        {canCreate && (
+                          <button
+                            type="button"
+                            onClick={(e) => onDelete(e, p.id, p.name)}
+                            disabled={pendingId === p.id}
+                            title={t.common.delete}
+                            aria-label={t.common.delete}
+                            className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
+                          >
+                            {pendingId === p.id ? (
+                              <Loader2 className="size-4 animate-spin" />
+                            ) : (
+                              <Trash2 className="size-4" />
+                            )}
+                          </button>
+                        )}
+                      </div>
                     </div>
 
                     {p.clientName && (

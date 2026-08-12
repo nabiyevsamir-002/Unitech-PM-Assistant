@@ -76,6 +76,12 @@ export const en: Dictionary = {
     statDone: "Done",
     statOverdue: "Overdue",
     statDueToday: "Due today",
+    importTitle: "Save as a project",
+    importHint: "Add this file to the app — its tasks appear on the Board and Dashboard, and you can delete it anytime.",
+    projectNameLabel: "Project name",
+    importButton: "Save",
+    imported: "Project added.",
+    viewProjects: "View projects",
   },
   documents: {
     title: "Documents — AI knowledge base",
@@ -222,6 +228,7 @@ export const en: Dictionary = {
     noClient: "No client",
     currency: "Currency",
     templateTasksNote: "tasks will be created automatically",
+    clearAll: "Clear data",
   },
   approvals: {
     title: "Approvals inbox",

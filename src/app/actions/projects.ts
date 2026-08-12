@@ -172,3 +172,196 @@ export async function createProjectFromTemplate(
     return { ok: false, message: "Nəsə düz getmədi. Bir azdan yenidən cəhd edin." };
   }
 }
+
+// ---- Excel import: turn parsed rows into a real, managed project + tasks ----
+
+// Diacritic-insensitive normalize so Azerbaijani status/priority/name words
+// match reliably (JS toLowerCase mangles "İ" — normalize+strip fixes it).
+function norm(s: string): string {
+  return s.normalize("NFD").replace(/[̀-ͯ]/g, "").trim().toLowerCase();
+}
+function mapStatus(s: string): string {
+  const n = norm(s);
+  if (/(tamamlan|bitdi|hazir|done|complet|closed)/.test(n)) return "DONE";
+  if (/(icrad|progress|davam|isl)/.test(n)) return "IN_PROGRESS";
+  if (/(yoxlam|review|test)/.test(n)) return "REVIEW";
+  return "TODO";
+}
+function mapPriority(s: string): string {
+  const n = norm(s);
+  if (/(tecili|urgent|kritik)/.test(n)) return "URGENT";
+  if (/(yuksek|high)/.test(n)) return "HIGH";
+  if (/(asagi|low)/.test(n)) return "LOW";
+  return "MEDIUM";
+}
+function toDate(v: string | null | undefined): Date | null {
+  if (!v) return null;
+  const d = new Date(v);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+const importTaskSchema = z.object({
+  title: z.string(),
+  assignee: z.string().optional().default(""),
+  status: z.string().optional().default(""),
+  priority: z.string().optional().default(""),
+  start: z.string().nullable().optional(),
+  end: z.string().nullable().optional(),
+  hours: z.number().nullable().optional(),
+  note: z.string().optional().default(""),
+});
+const importSchema = z.object({
+  name: z.string().min(1, "Layihə adı boş ola bilməz"),
+  tasks: z.array(importTaskSchema).min(1, "İdxal ediləcək tapşırıq yoxdur"),
+});
+
+/**
+ * Imports a parsed Excel task list as a managed project: creates the Project
+ * plus its Tasks (mapping AZ status/priority words to enums, matching assignee
+ * names to existing users, best-effort dates). PM+ only.
+ */
+export async function importExcelProject(
+  name: string,
+  tasks: unknown,
+): Promise<Result> {
+  const guard = await requireCreator();
+  if (!guard.ok) return guard;
+
+  const parsed = importSchema.safeParse({ name, tasks });
+  if (!parsed.success) {
+    return { ok: false, message: parsed.error.issues[0]?.message ?? "Məlumat düzgün deyil." };
+  }
+  const { name: projName, tasks: rows } = parsed.data;
+
+  // Best-effort assignee resolution by (normalized) name.
+  const users = await prisma.user.findMany({
+    where: { isActive: true },
+    select: { id: true, name: true },
+  });
+  const byName = new Map(users.map((u) => [norm(u.name), u.id]));
+
+  const taskData = rows
+    .filter((r) => r.title.trim() !== "")
+    .map((r, i) => ({
+      title: r.title.trim(),
+      status: mapStatus(r.status ?? ""),
+      priority: mapPriority(r.priority ?? ""),
+      assigneeId: byName.get(norm(r.assignee ?? "")) ?? null,
+      startDate: toDate(r.start),
+      dueDate: toDate(r.end),
+      estimatedHours: typeof r.hours === "number" ? r.hours : null,
+      description: r.note?.trim() || null,
+      orderIndex: i,
+    }));
+
+  if (taskData.length === 0) {
+    return { ok: false, message: "İdxal ediləcək tapşırıq tapılmadı." };
+  }
+
+  const dues = taskData.map((t) => t.dueDate).filter((d): d is Date => !!d);
+  const starts = taskData.map((t) => t.startDate).filter((d): d is Date => !!d);
+  const projectDue = dues.length ? new Date(Math.max(...dues.map((d) => d.getTime()))) : null;
+  const projectStart = starts.length ? new Date(Math.min(...starts.map((d) => d.getTime()))) : null;
+
+  try {
+    const project = await prisma.$transaction(async (tx) => {
+      const created = await tx.project.create({
+        data: {
+          name: projName.trim(),
+          status: "ACTIVE",
+          currency: "AZN",
+          startDate: projectStart,
+          dueDate: projectDue,
+        },
+      });
+      await tx.task.createMany({
+        data: taskData.map((t) => ({ ...t, projectId: created.id })),
+      });
+      return created;
+    });
+
+    await prisma.auditLog.create({
+      data: {
+        actor: `user:${guard.session.user.id}`,
+        action: "PROJECT_CREATED",
+        entity: `project:${project.id}`,
+        after: JSON.stringify({ name: project.name, source: "excel-import", taskCount: taskData.length }),
+      },
+    });
+
+    revalidateProjectViews();
+    return {
+      ok: true,
+      message: `«${project.name}» import edildi (${taskData.length} tapşırıq).`,
+      projectId: project.id,
+    };
+  } catch {
+    return { ok: false, message: "İdxal zamanı xəta baş verdi. Bir azdan yenidən cəhd edin." };
+  }
+}
+
+/** Deletes a project and everything under it (tasks, Excel link, attachments — cascade). PM+ only. */
+export async function deleteProject(projectId: string): Promise<Result> {
+  const guard = await requireCreator();
+  if (!guard.ok) return guard;
+  try {
+    const project = await prisma.project.findUnique({
+      where: { id: projectId },
+      select: { name: true },
+    });
+    if (!project) return { ok: false, message: "Layihə tapılmadı." };
+
+    await prisma.project.delete({ where: { id: projectId } }); // cascades tasks/excel/attachments
+
+    await prisma.auditLog.create({
+      data: {
+        actor: `user:${guard.session.user.id}`,
+        action: "PROJECT_DELETED",
+        entity: `project:${projectId}`,
+        before: JSON.stringify({ name: project.name }),
+      },
+    });
+
+    revalidateProjectViews();
+    return { ok: true, message: `«${project.name}» silindi.` };
+  } catch {
+    return { ok: false, message: "Silmək mümkün olmadı. Bir azdan yenidən cəhd edin." };
+  }
+}
+
+/**
+ * Wipes ALL project data (projects, tasks, approvals, time logs, attachments,
+ * documents, Excel links, clients) so the app starts clean. Keeps user accounts.
+ * PM+ only. Irreversible.
+ */
+export async function clearAllData(): Promise<Result> {
+  const guard = await requireCreator();
+  if (!guard.ok) return guard;
+  try {
+    await prisma.$transaction([
+      prisma.approval.deleteMany(),
+      prisma.timeLog.deleteMany(),
+      prisma.attachment.deleteMany(),
+      prisma.documentChunk.deleteMany(),
+      prisma.document.deleteMany(),
+      prisma.excelSource.deleteMany(),
+      prisma.task.deleteMany(),
+      prisma.project.deleteMany(),
+      prisma.client.deleteMany(),
+    ]);
+
+    await prisma.auditLog.create({
+      data: {
+        actor: `user:${guard.session.user.id}`,
+        action: "DATA_CLEARED",
+        entity: "all",
+        after: JSON.stringify({ note: "all project data cleared, users kept" }),
+      },
+    });
+
+    revalidateProjectViews();
+    return { ok: true, message: "Bütün layihə datası təmizləndi." };
+  } catch {
+    return { ok: false, message: "Təmizləmə zamanı xəta baş verdi." };
+  }
+}

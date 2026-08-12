@@ -8,11 +8,12 @@ import {
   CheckCircle2,
   Sparkles,
   FileSpreadsheet,
+  FolderKanban,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useI18n } from "@/components/providers/i18n-provider";
 
-type NavKey = "dashboard" | "board" | "excel" | "approvals";
+type NavKey = "dashboard" | "excel" | "projects" | "board" | "approvals";
 
 type NavItem = {
   href: string;
@@ -37,6 +38,7 @@ export function SidebarNav({
   const items: NavItem[] = [
     { href: "/dashboard", labelKey: "dashboard", icon: LayoutDashboard },
     { href: "/excel", labelKey: "excel", icon: FileSpreadsheet },
+    { href: "/projects", labelKey: "projects", icon: FolderKanban },
     { href: "/board", labelKey: "board", icon: KanbanSquare },
     {
       href: "/approvals",

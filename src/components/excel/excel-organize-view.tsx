@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   Upload,
   FileSpreadsheet,
@@ -12,13 +13,28 @@ import {
   CheckCircle2,
   Clock,
   CalendarClock,
+  FolderPlus,
+  ArrowRight,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { useI18n } from "@/components/providers/i18n-provider";
+import { importExcelProject } from "@/app/actions/projects";
 
 type Stats = { total: number; done: number; overdue: number; dueToday: number };
+type ImportTask = {
+  title: string;
+  assignee: string;
+  status: string;
+  priority: string;
+  start: string | null;
+  end: string | null;
+  hours: number | null;
+  note: string;
+};
 type Result = {
   ok: boolean;
   empty?: boolean;
@@ -27,22 +43,29 @@ type Result = {
   tsv: string;
   insights: string;
   stats: Stats;
+  tasks: ImportTask[];
   error?: string;
 };
 
 export function ExcelOrganizeView() {
   const { t } = useI18n();
+  const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<Result | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [fileName, setFileName] = useState<string>("");
+  const [projectName, setProjectName] = useState<string>("");
+  const [importing, setImporting] = useState(false);
+  const [importedId, setImportedId] = useState<string | null>(null);
 
   const handleFile = async (file: File) => {
     setError(null);
     setResult(null);
+    setImportedId(null);
     setBusy(true);
     setFileName(file.name);
+    setProjectName(file.name.replace(/\.xlsx$/i, "").trim());
     try {
       const fd = new FormData();
       fd.append("file", file);
@@ -57,6 +80,25 @@ export function ExcelOrganizeView() {
       setError(t.excel.error);
     } finally {
       setBusy(false);
+    }
+  };
+
+  const doImport = async () => {
+    if (!result || !projectName.trim() || importing) return;
+    setImporting(true);
+    try {
+      const res = await importExcelProject(projectName.trim(), result.tasks);
+      if (res.ok) {
+        setImportedId(res.projectId ?? null);
+        toast.success(res.message);
+        router.refresh();
+      } else {
+        toast.error(res.message);
+      }
+    } catch {
+      toast.error(t.excel.error);
+    } finally {
+      setImporting(false);
     }
   };
 
@@ -137,6 +179,48 @@ export function ExcelOrganizeView() {
             <StatTile icon={Clock} label={t.excel.statOverdue} value={result.stats.overdue} tone="danger" />
             <StatTile icon={CalendarClock} label={t.excel.statDueToday} value={result.stats.dueToday} tone="warn" />
           </div>
+
+          {/* Save as a managed project (import into the app) */}
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <FolderPlus className="size-4 text-primary" />
+                {t.excel.importTitle}
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {importedId ? (
+                <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <p className="flex items-center gap-2 text-sm text-success">
+                    <CheckCircle2 className="size-4" /> {t.excel.imported}
+                  </p>
+                  <Button variant="outline" size="sm" onClick={() => router.push("/projects")}>
+                    {t.excel.viewProjects}
+                    <ArrowRight className="size-3.5" />
+                  </Button>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <p className="text-sm text-muted-foreground">{t.excel.importHint}</p>
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+                    <div className="flex-1 space-y-1.5">
+                      <Label htmlFor="projName">{t.excel.projectNameLabel}</Label>
+                      <Input
+                        id="projName"
+                        value={projectName}
+                        onChange={(e) => setProjectName(e.target.value)}
+                        placeholder="Layihə adı"
+                      />
+                    </div>
+                    <Button onClick={doImport} disabled={importing || !projectName.trim()}>
+                      {importing ? <Loader2 className="size-4 animate-spin" /> : <FolderPlus className="size-4" />}
+                      {t.excel.importButton}
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
 
           {/* AI analysis */}
           {result.insights && (

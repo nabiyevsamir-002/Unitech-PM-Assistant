@@ -76,6 +76,12 @@ export const az = {
     statDone: "Tamamlanmış",
     statOverdue: "Gecikmiş",
     statDueToday: "Bu gün bitən",
+    importTitle: "Layihə kimi yadda saxla",
+    importHint: "Bu faylı app-a əlavə et — tapşırıqlar Lövhə və İdarə panelində görünəcək və istənilən vaxt silə bilərsən.",
+    projectNameLabel: "Layihənin adı",
+    importButton: "Yadda saxla",
+    imported: "Layihə əlavə olundu.",
+    viewProjects: "Layihələrə bax",
   },
   documents: {
     title: "Sənədlər — AI bilik bazası",
@@ -222,6 +228,7 @@ export const az = {
     noClient: "Müştərisiz",
     currency: "Valyuta",
     templateTasksNote: "tapşırıq avtomatik yaradılacaq",
+    clearAll: "Datanı təmizlə",
   },
   approvals: {
     title: "Təsdiq qutusu",
