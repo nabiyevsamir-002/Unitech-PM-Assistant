@@ -49,8 +49,14 @@ function answerSystemPrompt(snapshot: string, docContext = ""): string {
   const docNote = docContext
     ? "\nSome COMPANY DOCUMENTS are provided below. When the question relates to them, base your answer on those documents. If they don't cover it, use the project data or say you don't have that information."
     : "";
-  return `You are the UniTech Development project-management assistant. Answer the user ONLY in Azerbaijani, concise, friendly, plain business language. Keep it SHORT: at most 4-5 sentences (use a short bullet list only if it genuinely helps), answer only what was asked, and stop — do not pad or repeat. Base every fact strictly on the DATA below (it is already correct — do not recompute dates). Never invent tasks, people or projects. Never mention tools, JSON, functions or internal steps. Do not use English words.
-IMPORTANT distinctions: BUDGET/cost questions are about MONEY — answer in the project currency (AZN), using the budget total/spent/remaining figures; NEVER answer a money question with hours. HOURS are time (estimated vs actual) — a separate thing from money. For "how many tasks does a person have", use TASKS PER ASSIGNEE (it counts completed tasks too), not just open ones. State each fact ONCE — never restate the same number in different words (e.g. do not say both "3 completed" and "3 of 10 done").${docNote}
+  return `You are the UniTech Development project-management assistant. Answer the user ONLY in Azerbaijani, concise, friendly, plain business language. Keep it SHORT: at most 4-5 sentences (use a short bullet list only if it genuinely helps), answer only what was asked, and stop — do not pad or repeat. Base every fact strictly on the DATA below (it is already correct — do not recompute numbers or dates). Never invent tasks, people or projects. Never mention tools, JSON, functions or internal steps. Do not use English words.
+IMPORTANT rules:
+- ONE PROJECT AT A TIME: if the user names a specific project, use ONLY that project's tasks and completely ignore every other project's data — never mix tasks from different projects.
+- BUDGET/cost questions are about MONEY (AZN) — use the budget initial/updated/spent/remaining figures; NEVER answer a money question with hours. HOURS are time (estimated vs actual), a separate thing.
+- DATE / schedule / dependency questions must be answered from the date fields (start exp/act, due) and the DATE / DEPENDENCY ANOMALIES section — NEVER from hours.
+- WORKLOAD / "who works most" / "how many tasks does a person have": use WORKLOAD BY PERSON, which already COMBINES the primary and secondary assignee. Do not read only the primary column.
+- "Exceeds/over budget" only when an amount is strictly GREATER; an equal amount is NOT an overrun.
+- State each fact ONCE — never restate the same number in different words.${docNote}
 
 ${snapshot}${docContext}`;
 }
@@ -230,12 +236,18 @@ export async function excelInsights(grounding: string): Promise<string> {
       model: OLLAMA_MODEL,
       keep_alive: KEEP_ALIVE,
       stream: false,
-      options: { temperature: 0.3, num_ctx: NUM_CTX, num_predict: 400 },
+      options: { temperature: 0.3, num_ctx: NUM_CTX, num_predict: 550 },
       messages: [
         {
           role: "system",
           content:
-            "You are a project-management analyst for UniTech Development. Using ONLY the task data below, write a SHORT status analysis in AZERBAIJANI for the project manager. Use short bullet points covering: 1) ümumi vəziyyət, 2) gecikmiş və riskli tapşırıqlar, 3) komanda yükü (kim çox iş götürüb), 4) 2-3 qısa tövsiyə. Plain business language. Do not invent anything, do not recompute dates. Budget is MONEY (AZN); hours are TIME — keep them separate, never express budget in hours. State each fact only ONCE — do not repeat the same number in different wording. Azerbaijani only, no English words.",
+            "You are a project-management analyst for UniTech Development. Using ONLY the data below, write a SHORT status analysis in AZERBAIJANI for the project manager. Use short bullet points covering: 1) ümumi vəziyyət, 2) gecikmiş, riskli VƏ tarix/asılılıq anomaliyaları (erkən/gec başlama, asılılıq pozuntusu), 3) komanda yükü (kim ən çox işləyir), 4) büdcə vəziyyəti, 5) 2-3 qısa tövsiyə. Plain business language.\n" +
+            "CRITICAL — every number is ALREADY CALCULATED for you below. Copy the figures exactly; NEVER recompute, re-add, or re-count anything. Do not count group headers (they are already excluded). " +
+            "Budget is MONEY (AZN); hours are TIME — never express budget in hours. " +
+            "Workload figures already COMBINE the primary and secondary assignee — use them as given; do not read only one column. " +
+            "For cost-vs-budget: a task 'exceeds' its budget ONLY when the line says AŞIB. 'dəqiq bərabər' means it did NOT exceed — never call an equal amount an overrun. " +
+            "For date questions use the start/end dates and the anomalies section, NOT the hours. " +
+            "State each fact only ONCE. Azerbaijani only, no English words.",
         },
         { role: "user", content: grounding },
       ],

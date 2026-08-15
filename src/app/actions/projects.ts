@@ -208,14 +208,24 @@ function toDate(v: string | null | undefined): Date | null {
 
 const importTaskSchema = z.object({
   title: z.string(),
+  id: z.string().optional().default(""),
+  subId: z.string().optional().default(""),
   assignee: z.string().optional().default(""),
+  assignee2: z.string().optional().default(""),
+  dependsOn: z.string().optional().default(""),
   status: z.string().optional().default(""),
   priority: z.string().optional().default(""),
   start: z.string().nullable().optional(),
   end: z.string().nullable().optional(),
+  expectedStart: z.string().nullable().optional(),
+  actualStart: z.string().nullable().optional(),
+  expectedEnd: z.string().nullable().optional(),
+  actualEnd: z.string().nullable().optional(),
   hours: z.number().nullable().optional(),
   actualHours: z.number().nullable().optional(),
+  hourlyRate: z.number().nullable().optional(),
   budget: z.number().nullable().optional(),
+  initialBudget: z.number().nullable().optional(),
   note: z.string().optional().default(""),
 });
 const importSchema = z.object({
@@ -272,21 +282,34 @@ export async function importExcelProject(
     .filter((r) => r.title.trim() !== "")
     .map((r, i) => {
       const rawAssignee = (r.assignee ?? "").trim();
+      const rawAssignee2 = (r.assignee2 ?? "").trim();
+      const numOrNull = (v: unknown) => (typeof v === "number" ? v : null);
       return {
         title: r.title.trim(),
         status: mapStatus(r.status ?? ""),
         priority: mapPriority(r.priority ?? ""),
         assigneeId: matchUserId(rawAssignee),
-        startDate: toDate(r.start),
-        dueDate: toDate(r.end),
+        // Prefer the actual start when known, else the planned one; due = deadline.
+        startDate: toDate(r.actualStart ?? r.expectedStart ?? r.start),
+        dueDate: toDate(r.expectedEnd ?? r.end),
         estimatedHours: typeof r.hours === "number" ? r.hours : null,
         description: r.note?.trim() || null,
-        // Keep the raw assignee name (even when unmatched) + actual hours +
-        // budget so the AI can report them — not first-class columns yet.
+        // Columns that aren't first-class DB fields are stashed here so the AI
+        // can still report them: raw assignee names, secondary assignee, actual
+        // hours, both budgets, hourly rate, dependency + all four dates.
         customFields: JSON.stringify({
+          sourceId: r.id || null,
           assigneeName: rawAssignee || null,
-          actualHours: typeof r.actualHours === "number" ? r.actualHours : null,
-          budget: typeof r.budget === "number" ? r.budget : null,
+          assignee2Name: rawAssignee2 || null,
+          dependsOn: r.dependsOn || null,
+          actualHours: numOrNull(r.actualHours),
+          hourlyRate: numOrNull(r.hourlyRate),
+          budget: numOrNull(r.budget),
+          initialBudget: numOrNull(r.initialBudget),
+          expectedStart: r.expectedStart ?? null,
+          actualStart: r.actualStart ?? null,
+          expectedEnd: r.expectedEnd ?? null,
+          actualEnd: r.actualEnd ?? null,
         }),
         orderIndex: i,
       };

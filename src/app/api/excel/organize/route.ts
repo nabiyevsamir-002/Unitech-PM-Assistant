@@ -1,27 +1,22 @@
 import { auth } from "@/auth";
 import ExcelJS from "exceljs";
 import { parseWorkbook } from "@/lib/excel/read";
+import { analyzeTasks } from "@/lib/excel/analyze";
 import { excelInsights } from "@/lib/ollama/agents";
-import { isOverdue, isDueToday, formatDate } from "@/lib/format";
+import { formatDate } from "@/lib/format";
 import type { ParsedTask } from "@/lib/excel/types";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
 
-// Best-effort "is this task finished" check across common AZ/EN status words.
-const DONE_WORDS = ["tamamland", "tamamlan", "bitdi", "hazır", "done", "completed", "closed"];
-function isDone(status: string): boolean {
-  const s = String(status).trim().toLowerCase();
-  return DONE_WORDS.some((w) => s.includes(w));
-}
-
-const HEADERS = ["№", "Tapşırıq", "Məsul", "Status", "Prioritet", "Başlama", "Bitmə", "Təxmini saat", "Faktiki saat", "Büdcə", "Qeyd"];
+const HEADERS = ["№", "Tapşırıq", "Məsul", "İkinci icraçı", "Status", "Prioritet", "Başlama", "Bitmə", "Təxmini saat", "Faktiki saat", "Büdcə (AZN)", "Asılılıq", "Qeyd"];
 
 function toRow(t: ParsedTask): string[] {
   return [
     String(t.index),
     t.title,
     t.assignee,
+    t.assignee2,
     t.status,
     t.priority,
     t.start ? formatDate(t.start) : "",
@@ -29,6 +24,7 @@ function toRow(t: ParsedTask): string[] {
     t.hours != null ? String(t.hours) : "",
     t.actualHours != null ? String(t.actualHours) : "",
     t.budget != null ? String(t.budget) : "",
+    t.dependsOn,
     t.note,
   ];
 }
@@ -82,46 +78,11 @@ export async function POST(req: Request) {
   const rows = tasks.map(toRow);
   const tsv = [HEADERS, ...rows].map((r) => r.join("\t")).join("\n");
 
-  const notDone = tasks.filter((t) => !isDone(t.status));
-  const overdue = notDone.filter((t) => isOverdue(t.end));
-  const dueToday = notDone.filter((t) => isDueToday(t.end));
-  const stats = {
-    total: tasks.length,
-    done: tasks.length - notDone.length,
-    overdue: overdue.length,
-    dueToday: dueToday.length,
-  };
+  // All figures (stats, combined workload, budget totals, cost-vs-budget, date
+  // & dependency anomalies) are computed in code; the model only narrates them.
+  const { stats, grounding } = analyzeTasks(tasks);
 
-  // Grounding text — numbers computed here, the model only narrates them.
-  const lines: string[] = [];
-  lines.push(`Bugünkü tarix: ${formatDate(new Date().toISOString())} (Bakı vaxtı).`);
-  lines.push(
-    `Statistika: ümumi ${stats.total}, tamamlanmış ${stats.done}, gecikmiş ${stats.overdue}, bu gün bitən ${stats.dueToday}.`,
-  );
-  const totalBudget = tasks.reduce((s, t) => s + (t.budget ?? 0), 0);
-  const totalEst = tasks.reduce((s, t) => s + (t.hours ?? 0), 0);
-  const totalActual = tasks.reduce((s, t) => s + (t.actualHours ?? 0), 0);
-  if (totalBudget > 0) lines.push(`Ümumi büdcə: ${totalBudget} AZN.`);
-  if (totalEst > 0 || totalActual > 0)
-    lines.push(`Saatlar: təxmini ${totalEst}, faktiki ${totalActual}.`);
-  lines.push("Tapşırıqlar:");
-  for (const t of tasks) {
-    const flags: string[] = [];
-    if (!isDone(t.status) && isOverdue(t.end)) flags.push("GECİKİB");
-    else if (!isDone(t.status) && isDueToday(t.end)) flags.push("BUGÜN BİTİR");
-    if (t.actualHours != null && t.hours != null && t.actualHours > t.hours)
-      flags.push("SAAT AŞIMI");
-    const hoursStr =
-      t.hours != null || t.actualHours != null
-        ? ` | saat: ${t.hours ?? "—"}/${t.actualHours ?? "—"} (təxmini/faktiki)`
-        : "";
-    const budgetStr = t.budget != null ? ` | büdcə: ${t.budget} AZN` : "";
-    lines.push(
-      `- ${t.title} | məsul: ${t.assignee || "təyin edilməyib"} | status: ${t.status || "—"} | prioritet: ${t.priority || "—"} | bitmə: ${t.end ? formatDate(t.end) : "—"}${hoursStr}${budgetStr}${flags.length ? " [" + flags.join(", ") + "]" : ""}`,
-    );
-  }
-
-  const insights = await excelInsights(lines.join("\n"));
+  const insights = await excelInsights(grounding);
 
   // `tasks` (structured) lets the client offer "import as project" without re-upload.
   return Response.json({ ok: true, empty: false, headers: HEADERS, rows, tsv, insights, stats, tasks });

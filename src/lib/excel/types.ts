@@ -10,15 +10,25 @@ export type ExcelSheet = { name: string; rows: ExcelCellValue[][] };
 
 export type ParsedTask = {
   index: number;
+  id: string; // source "ID" (e.g. "P1-01", "T-001"); "" if none
+  subId: string; // source "Alt-ID"; "" if none (used to spot group-header rows)
   title: string;
-  assignee: string;
+  assignee: string; // primary responsible person
+  assignee2: string; // secondary assignee ("İkinci İcraçı"); "" if none
+  dependsOn: string; // raw dependency id(s) ("Asılılıq (ID)"); "" if none
   status: string;
   priority: string;
-  start: string | null;
-  end: string | null;
+  start: string | null; // effective start: actual ?? expected ?? single
+  end: string | null; // effective deadline: expected ?? single (used for overdue)
+  expectedStart: string | null;
+  actualStart: string | null;
+  expectedEnd: string | null;
+  actualEnd: string | null;
   hours: number | null; // estimated hours
   actualHours: number | null; // actual / logged hours
-  budget: number | null;
+  hourlyRate: number | null; // "Saatlıq Ödəniş" — lets us derive actual cost
+  budget: number | null; // effective/current budget: updated ?? initial ?? single
+  initialBudget: number | null; // separate initial budget if the file had one
   note: string;
 };
 

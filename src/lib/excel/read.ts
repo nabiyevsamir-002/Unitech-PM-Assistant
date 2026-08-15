@@ -139,61 +139,186 @@ export function parseWorkbook(wb: ExcelJS.Workbook): ExcelModel {
   return { sheets, meta, tasks };
 }
 
+// Header predicates (all run on the AZ-safe lowercased header cell).
+const isExpected = (h: string) =>
+  /(gözlə|gozle|planla|plan|expected|nəzərdə|nezerde)/.test(h);
+const isActual = (h: string) => /(faktiki|faktik|actual|real)/.test(h);
+const isStartWord = (h: string) =>
+  h.includes("başlama") || h.includes("baslama") || h.includes("start");
+const isEndWord = (h: string) =>
+  /(bitmə|bitme|son|end|due|deadline|təhvil|tehvil)/.test(h);
+const isBudgetWord = (h: string) =>
+  h.includes("büdcə") || h.includes("budce") || h.includes("budget");
+
 function parseTasks(rows: ExcelCellValue[][], headerIdx: number): ParsedTask[] {
   const header = rows[headerIdx].map((c) => lc(c));
   const col = (names: string[]) =>
     header.findIndex((h) => names.some((n) => h.includes(n)));
 
+  // Hourly-rate column ("Saatlıq Ödəniş") also contains "saat" — detect it first
+  // so the hours-column search below can exclude it and never mistake a rate for
+  // estimated hours.
+  const rateCol = header.findIndex(
+    (h) =>
+      h.includes("saatlıq") ||
+      h.includes("saatliq") ||
+      h.includes("ödəniş") ||
+      h.includes("odenis") ||
+      h.includes("rate") ||
+      h.includes("tarif") ||
+      h.includes("hourly"),
+  );
+
   // Hours: a sheet may have BOTH "Təxmini Saat" (estimated) and "Faktiki Saat"
-  // (actual) — both contain "saat", so disambiguate before falling back.
+  // (actual) — both contain "saat", so disambiguate before falling back, and
+  // never pick the hourly-rate column.
   const actualHoursCol = header.findIndex(
-    (h) => (h.includes("saat") || h.includes("hour")) && /(faktiki|actual|real)/.test(h),
+    (h, i) => i !== rateCol && (h.includes("saat") || h.includes("hour")) && isActual(h),
   );
   const estHoursCol = (() => {
     const pref = header.findIndex(
       (h, i) =>
         i !== actualHoursCol &&
+        i !== rateCol &&
         (h.includes("saat") || h.includes("hour")) &&
-        /(təxmini|plan|estimat)/.test(h),
+        /(təxmini|texmini|plan|estimat)/.test(h),
     );
     if (pref >= 0) return pref;
     return header.findIndex(
-      (h, i) => i !== actualHoursCol && (h.includes("saat") || h.includes("hour")),
+      (h, i) =>
+        i !== actualHoursCol && i !== rateCol && (h.includes("saat") || h.includes("hour")),
+    );
+  })();
+
+  // Dates: a complex sheet splits start/end into expected vs actual columns; a
+  // simple sheet has one of each. Prefer the explicit expected/actual columns,
+  // else fall back to the single column.
+  const startExpCol = header.findIndex((h) => isStartWord(h) && isExpected(h));
+  const startActCol = header.findIndex((h) => isStartWord(h) && isActual(h));
+  const endExpCol = header.findIndex((h) => isEndWord(h) && isExpected(h));
+  const endActCol = header.findIndex((h) => isEndWord(h) && isActual(h));
+  const startAnyCol = header.findIndex(isStartWord);
+  const endAnyCol = header.findIndex(isEndWord);
+  const expStartCol = startExpCol >= 0 ? startExpCol : startActCol >= 0 ? -1 : startAnyCol;
+  const expEndCol = endExpCol >= 0 ? endExpCol : endActCol >= 0 ? -1 : endAnyCol;
+
+  // Budget: a complex sheet has İlkin (initial) + Yenilənmiş (updated); a simple
+  // sheet has one. The "current" budget is the updated one when present.
+  const budInitCol = header.findIndex(
+    (h) => isBudgetWord(h) && /(ilkin|initial|əvvəl|evvel|ilk)/.test(h),
+  );
+  const budUpdCol = header.findIndex(
+    (h) => isBudgetWord(h) && /(yenilə|yenile|updated|revised|cari)/.test(h),
+  );
+  const budAnyCol = header.findIndex(
+    (h) =>
+      isBudgetWord(h) ||
+      h.includes("məbləğ") ||
+      h.includes("mebleg") ||
+      h.includes("dəyər") ||
+      h.includes("deyer"),
+  );
+  const budgetCol = budUpdCol >= 0 ? budUpdCol : budInitCol >= 0 ? budInitCol : budAnyCol;
+
+  const subIdCol = header.findIndex(
+    (h) => h.includes("alt-id") || h.includes("alt id") || h.includes("altid"),
+  );
+  const idCol = (() => {
+    const i = header.findIndex(
+      (h) => h === "id" || h.includes("tapşırıq id") || h.includes("task id"),
+    );
+    if (i >= 0) return i;
+    return header.findIndex(
+      (h, k) =>
+        h.includes("id") && k !== subIdCol && !h.includes("asıl") && !h.includes("depend"),
     );
   })();
 
   const ci = {
+    id: idCol,
+    subId: subIdCol,
     title: findTitleCol(header),
-    assignee: col(["məsul", "icraçı", "assignee"]),
+    // Primary responsible: "Məsul"/"İcraçı" but NOT the "İkinci İcraçı" column.
+    assignee: header.findIndex(
+      (h) => h.includes("məsul") || h.includes("assignee") || (h.includes("icraçı") && !h.includes("ikinci")),
+    ),
+    assignee2: header.findIndex(
+      (h) =>
+        h.includes("ikinci") ||
+        h.includes("second") ||
+        h.includes("köməkçi") ||
+        h.includes("komekci"),
+    ),
+    dependsOn: header.findIndex(
+      (h) => h.includes("asıl") || h.includes("asil") || h.includes("depend"),
+    ),
     status: col(["status", "vəziyyət"]),
     priority: col(["prioritet", "priority", "önəm"]),
-    start: col(["başlama", "start"]),
-    end: col(["bitmə", "son", "end", "due", "deadline"]),
+    expStart: expStartCol,
+    actStart: startActCol,
+    expEnd: expEndCol,
+    actEnd: endActCol,
     hours: estHoursCol,
     actualHours: actualHoursCol,
-    budget: col(["büdcə", "budget", "məbləğ", "dəyər"]),
+    rate: rateCol,
+    budget: budgetCol,
+    initBudget: budInitCol,
     note: col(["qeyd", "note", "şərh"]),
   };
   const num = (v: ExcelCellValue): number | null =>
     typeof v === "number" ? v : null;
+  const str = (i: number, r: ExcelCellValue[]): string => (i >= 0 ? String(r[i] ?? "").trim() : "");
+  const date = (i: number, r: ExcelCellValue[]): string | null => (i >= 0 ? asDate(r[i]) : null);
+  const empty = (v: ExcelCellValue): boolean => v == null || String(v).trim() === "";
 
   const out: ParsedTask[] = [];
   for (let i = headerIdx + 1; i < rows.length; i++) {
     const r = rows[i];
     const title = ci.title >= 0 ? r[ci.title] : null;
     if (title == null || String(title).trim() === "") break;
+
+    // Skip group/section-header rows (e.g. "P1 | İnfrastrukturun Qurulması").
+    // In sheets with an Alt-ID column, a header row has a blank Alt-ID; more
+    // generally, a header row carries a title but no assignee, status, hours or
+    // budget — i.e. it is not an actual task.
+    const emptyAt = (i: number) => i < 0 || empty(r[i]);
+    const isGroupHeader =
+      (ci.subId >= 0 && empty(r[ci.subId])) ||
+      (emptyAt(ci.assignee) &&
+        emptyAt(ci.assignee2) &&
+        emptyAt(ci.status) &&
+        emptyAt(ci.hours) &&
+        emptyAt(ci.budget));
+    if (isGroupHeader) continue;
+
+    const expStart = date(ci.expStart, r);
+    const actStart = date(ci.actStart, r);
+    const expEnd = date(ci.expEnd, r);
+    const actEnd = date(ci.actEnd, r);
+    const budget = ci.budget >= 0 ? num(r[ci.budget]) : null;
+    const initBudget = ci.initBudget >= 0 ? num(r[ci.initBudget]) : null;
     out.push({
       index: out.length + 1,
-      title: String(title),
-      assignee: ci.assignee >= 0 ? String(r[ci.assignee] ?? "") : "",
-      status: ci.status >= 0 ? String(r[ci.status] ?? "") : "",
-      priority: ci.priority >= 0 ? String(r[ci.priority] ?? "") : "",
-      start: ci.start >= 0 ? asDate(r[ci.start]) : null,
-      end: ci.end >= 0 ? asDate(r[ci.end]) : null,
+      id: str(ci.id, r),
+      subId: str(ci.subId, r),
+      title: String(title).trim(),
+      assignee: str(ci.assignee, r),
+      assignee2: str(ci.assignee2, r),
+      dependsOn: str(ci.dependsOn, r),
+      status: str(ci.status, r),
+      priority: str(ci.priority, r),
+      start: actStart ?? expStart,
+      end: expEnd ?? actEnd,
+      expectedStart: expStart,
+      actualStart: actStart,
+      expectedEnd: expEnd,
+      actualEnd: actEnd,
       hours: ci.hours >= 0 ? num(r[ci.hours]) : null,
       actualHours: ci.actualHours >= 0 ? num(r[ci.actualHours]) : null,
-      budget: ci.budget >= 0 ? num(r[ci.budget]) : null,
-      note: ci.note >= 0 ? String(r[ci.note] ?? "") : "",
+      hourlyRate: ci.rate >= 0 ? num(r[ci.rate]) : null,
+      budget,
+      initialBudget: initBudget ?? (budUpdCol < 0 ? null : budget),
+      note: str(ci.note, r),
     });
   }
   return out;
