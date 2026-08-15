@@ -43,7 +43,55 @@ export function getCell(
   return normalizeCell(ws.getCell(cell).value);
 }
 
-const HEADER_KEYS = ["tapşırıq", "task", "işin adı", "iş"];
+// Substrings that mark a "task name" header cell. Matched by SUBSTRING
+// (case-insensitive) so natural Azerbaijani headers like "Tapşırığın Adı",
+// "İşin adı", "Fəaliyyət" and English "Task name" are all recognized — not just
+// an exact "Task"/"Tapşırıq". ("tapşırığ" covers the possessive stem "tapşırığın".)
+const TITLE_HINTS = [
+  "tapşırıq",
+  "tapşırığ",
+  "işin ad",
+  "iş ad",
+  "task",
+  "fəaliyyət",
+  "görüləcək",
+];
+
+// Azerbaijani-safe lowercase for header matching. JS lowercases the AZ capital
+// "İ" (U+0130) to "i" + a combining dot (U+0307), which breaks substring checks
+// like includes("icraçı") / includes("iş"). Strip ONLY that combining dot (not a
+// full NFD decompose — that would also split "ş"→"s" and break the hints).
+function lc(c: ExcelCellValue): string {
+  if (typeof c !== "string") return "";
+  return c.toLowerCase().replace(/\u0307/g, "").trim();
+}
+
+function isTitleHeaderCell(c: ExcelCellValue): boolean {
+  const h = lc(c);
+  return !!h && TITLE_HINTS.some((n) => h.includes(n));
+}
+
+/**
+ * Pick the task-NAME column, preferring an explicit name header and never
+ * mistaking an id column (e.g. "Tapşırıq ID") for the task title.
+ */
+function findTitleCol(header: string[]): number {
+  // 1) A task/work word paired with "ad" (adı) — e.g. "Tapşırığın adı", "İşin adı".
+  let idx = header.findIndex(
+    (h) => /(tapşır|iş|task|fəaliyyət|görül)/.test(h) && h.includes("ad"),
+  );
+  if (idx >= 0) return idx;
+  // 2) A task/work word that is NOT an id column.
+  idx = header.findIndex(
+    (h) =>
+      ["tapşırıq", "tapşırığ", "task", "fəaliyyət", "görüləcək"].some((n) =>
+        h.includes(n),
+      ) && !h.includes("id"),
+  );
+  if (idx >= 0) return idx;
+  // 3) Bare "iş" fallback, still excluding id columns.
+  return header.findIndex((h) => h.includes("iş") && !h.includes("id"));
+}
 
 /**
  * Reads an arbitrary project workbook into the internal standard model:
@@ -81,13 +129,7 @@ export function parseWorkbook(wb: ExcelJS.Workbook): ExcelModel {
 
     // Tasks: locate a header row, then read until a blank title.
     if (tasks.length === 0) {
-      const headerIdx = rows.findIndex((r) =>
-        r.some(
-          (c) =>
-            typeof c === "string" &&
-            HEADER_KEYS.includes(c.trim().toLowerCase()),
-        ),
-      );
+      const headerIdx = rows.findIndex((r) => r.some(isTitleHeaderCell));
       if (headerIdx !== -1) {
         tasks = parseTasks(rows, headerIdx);
       }
@@ -98,21 +140,19 @@ export function parseWorkbook(wb: ExcelJS.Workbook): ExcelModel {
 }
 
 function parseTasks(rows: ExcelCellValue[][], headerIdx: number): ParsedTask[] {
-  const header = rows[headerIdx].map((c) =>
-    typeof c === "string" ? c.trim().toLowerCase() : "",
-  );
+  const header = rows[headerIdx].map((c) => lc(c));
   const col = (names: string[]) =>
     header.findIndex((h) => names.some((n) => h.includes(n)));
 
   const ci = {
-    title: col(["tapşırıq", "task", "iş"]),
+    title: findTitleCol(header),
     assignee: col(["məsul", "icraçı", "assignee"]),
-    status: col(["status"]),
-    priority: col(["prioritet", "priority"]),
+    status: col(["status", "vəziyyət"]),
+    priority: col(["prioritet", "priority", "önəm"]),
     start: col(["başlama", "start"]),
-    end: col(["bitmə", "son", "end", "due"]),
+    end: col(["bitmə", "son", "end", "due", "deadline"]),
     hours: col(["saat", "hour"]),
-    note: col(["qeyd", "note"]),
+    note: col(["qeyd", "note", "şərh"]),
   };
 
   const out: ParsedTask[] = [];
