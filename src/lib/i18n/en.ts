@@ -280,7 +280,7 @@ export const en: Dictionary = {
     aiOnline: "Connected",
     aiOffline: "Unavailable",
     aiOfflineHint:
-      "Ollama is not running. Core features (board, tasks) keep working.",
+      "The AI server (RunPod GPU pod) may be off — Start the pod on RunPod and run start.sh. Core features (board, tasks) keep working.",
     team: "Team",
     role: "Role",
     capacity: "Weekly capacity (hours)",

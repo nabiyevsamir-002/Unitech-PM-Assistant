@@ -31,8 +31,13 @@ services:
     # ports:
     #   - "5433:5432"
 
+  # Bundled local Ollama — only starts with `--profile local-ai`. When the app
+  # points OLLAMA_HOST at a remote GPU host (e.g. RunPod), leave this OFF so the
+  # small droplet never runs a CPU model or downloads a big one. Enable locally
+  # with: docker compose --profile local-ai ... up -d
   ollama:
     image: ollama/ollama:latest
+    profiles: ["local-ai"]
     restart: unless-stopped
     volumes:
       - ollama:/root/.ollama
@@ -48,6 +53,7 @@ services:
   # One-shot: pull the chat + embedding models into the ollama volume on first boot.
   ollama-init:
     image: ollama/ollama:latest
+    profiles: ["local-ai"]
     depends_on:
       ollama:
         condition: service_healthy
@@ -82,8 +88,6 @@ services:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
-      ollama:
-        condition: service_healthy
     environment:
       NODE_ENV: production
       DATABASE_URL: postgresql://unitech:${POSTGRES_PASSWORD:-unitech_dev_pw}@postgres:5432/unitech_pm?schema=public
@@ -93,7 +97,12 @@ services:
       # so next-auth builds redirects (sign-out, callbacks) against the real
       # domain instead of the container's internal 0.0.0.0:3000 address.
       AUTH_URL: ${AUTH_URL:-}
-      OLLAMA_HOST: http://ollama:11434
+      # Ollama endpoint. Defaults to the bundled `ollama` container (needs
+      # --profile local-ai); override in .env.docker to point at a remote GPU
+      # host, e.g. OLLAMA_HOST=https://<pod>-8000.proxy.runpod.net
+      OLLAMA_HOST: ${OLLAMA_HOST:-http://ollama:11434}
+      # Bearer token sent to OLLAMA_HOST when it sits behind an auth proxy.
+      OLLAMA_API_KEY: ${OLLAMA_API_KEY:-}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:7b}
       OLLAMA_EMBED_MODEL: ${OLLAMA_EMBED_MODEL:-nomic-embed-text}
       # AI speed/quality tuning — keep the model warm + a context window big

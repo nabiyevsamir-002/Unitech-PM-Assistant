@@ -280,7 +280,7 @@ export const az = {
     aiOnline: "Qoşulub",
     aiOffline: "Əlçatmaz",
     aiOfflineHint:
-      "Ollama işləmir. Əsas funksiyalar (lövhə, tapşırıqlar) işləməyə davam edir.",
+      "AI serveri (RunPod GPU pod) sönülü ola bilər — RunPod-da pod-u Start edib start.sh işə sal. Əsas funksiyalar (lövhə, tapşırıqlar) işləməyə davam edir.",
     team: "Komanda",
     role: "Rol",
     capacity: "Həftəlik tutum (saat)",

@@ -65,7 +65,10 @@ export async function POST(req: Request) {
       } catch (e) {
         console.error("[ai] chat stream failed:", e instanceof Error ? e.message : e);
         controller.enqueue(
-          encoder.encode("AI köməkçisi hazırda əlçatmazdır."),
+          encoder.encode(
+            "AI serveri əlçatmazdır. GPU serveri (RunPod pod) sönülü ola bilər — " +
+              "onu Start edib bir neçə saniyə gözlədikdən sonra yenidən cəhd et.",
+          ),
         );
       } finally {
         controller.close();
