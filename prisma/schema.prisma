@@ -25,6 +25,7 @@ model User {
   email              String    @unique
   passwordHash       String
   role               String    @default("MEMBER") // OWNER | DEPUTY_OWNER | PM | MEMBER
+  position           String?   // free-text job title / vəzifə (e.g. "Backend Developer") — descriptive, separate from role
   weeklyCapacityHours Int      @default(40)
   skills             String    @default("[]") // JSON array of strings
   avatar             String?

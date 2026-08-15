@@ -23,8 +23,11 @@ async function requireAdmin() {
 
 const createInput = z.object({
   name: z.string().min(1),
-  email: z.string().email(),
-  role: z.enum(ROLES),
+  // Optional: employees who only need to appear in the roster / be assignable
+  // don't need a login. Blank → we generate a unique placeholder address.
+  email: z.union([z.string().email(), z.literal("")]).optional(),
+  position: z.string().max(120).optional(),
+  role: z.enum(ROLES).default("MEMBER"),
   weeklyCapacityHours: z.number().int().min(0).max(168).default(40),
   password: z.string().min(6).default("demo1234"),
 });
@@ -39,9 +42,21 @@ export async function createUser(
   if (!parsed.success) {
     return { ok: false, message: "Məlumat düzgün deyil." };
   }
-  const email = parsed.data.email.toLowerCase();
-  const existing = await prisma.user.findUnique({ where: { email } });
-  if (existing) return { ok: false, message: "Bu e-poçt artıq istifadə olunur." };
+
+  let email = (parsed.data.email ?? "").toLowerCase().trim();
+  if (email) {
+    const existing = await prisma.user.findUnique({ where: { email } });
+    if (existing) return { ok: false, message: "Bu e-poçt artıq istifadə olunur." };
+  } else {
+    // Non-login employee: synthesize a unique, unusable placeholder address.
+    const slug =
+      parsed.data.name
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "")
+        .slice(0, 24) || "isci";
+    email = `${slug}-${Date.now().toString(36)}@employee.local`;
+  }
 
   const passwordHash = await bcrypt.hash(parsed.data.password, 10);
   const created = await prisma.user.create({
@@ -50,6 +65,7 @@ export async function createUser(
       email,
       passwordHash,
       role: parsed.data.role,
+      position: parsed.data.position?.trim() || null,
       weeklyCapacityHours: parsed.data.weeklyCapacityHours,
     },
   });
@@ -68,6 +84,7 @@ export async function createUser(
 
 const updateInput = z.object({
   role: z.enum(ROLES).optional(),
+  position: z.string().max(120).nullable().optional(),
   weeklyCapacityHours: z.number().int().min(0).max(168).optional(),
   unavailableFrom: z.string().nullable().optional(),
   unavailableTo: z.string().nullable().optional(),
@@ -87,6 +104,9 @@ export async function updateUser(
     where: { id },
     data: {
       ...(parsed.data.role !== undefined ? { role: parsed.data.role } : {}),
+      ...(parsed.data.position !== undefined
+        ? { position: parsed.data.position?.trim() || null }
+        : {}),
       ...(parsed.data.weeklyCapacityHours !== undefined
         ? { weeklyCapacityHours: parsed.data.weeklyCapacityHours }
         : {}),
@@ -130,4 +150,35 @@ export async function setUserActive(
       ? "Üzv yenidən aktiv edildi."
       : "Üzv deaktiv edildi — girişi ləğv olundu.",
   };
+}
+
+/**
+ * Hard-delete an employee from the roster. Safe by schema: their tasks and
+ * decided approvals fall back to unassigned (onDelete: SetNull) and their time
+ * logs cascade away (onDelete: Cascade) — nothing else references a user.
+ */
+export async function deleteUser(id: string): Promise<Result> {
+  const guard = await requireAdmin();
+  if (!guard.ok) return guard;
+
+  // Never delete the account you're signed in with.
+  if (id === guard.session.user.id) {
+    return { ok: false, message: "Özünüzü silə bilməzsiniz." };
+  }
+
+  const user = await prisma.user.findUnique({ where: { id } });
+  if (!user) return { ok: false, message: "İşçi tapılmadı." };
+
+  await prisma.user.delete({ where: { id } });
+  await prisma.auditLog.create({
+    data: {
+      actor: `user:${guard.session.user.id}`,
+      action: "USER_DELETED",
+      entity: `user:${id}`,
+      after: JSON.stringify({ name: user.name, email: user.email }),
+    },
+  });
+
+  revalidatePath("/settings");
+  return { ok: true, message: `${user.name} silindi.` };
 }

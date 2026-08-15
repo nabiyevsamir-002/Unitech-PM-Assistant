@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { UserPlus, Pencil, UserX, UserCheck, ShieldCheck } from "lucide-react";
+import { UserPlus, Pencil, UserX, UserCheck, ShieldCheck, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -28,7 +28,7 @@ import { useI18n } from "@/components/providers/i18n-provider";
 import { cn } from "@/lib/utils";
 import { isCurrentlyUnavailable } from "@/lib/format";
 import { ROLES } from "@/lib/constants";
-import { createUser, updateUser, setUserActive } from "@/app/actions/users";
+import { createUser, updateUser, setUserActive, deleteUser } from "@/app/actions/users";
 import { resetUserTotp } from "@/app/actions/totp";
 import type { UserDTO } from "@/lib/types";
 
@@ -61,6 +61,19 @@ export function TeamManager({
     startTransition(async () => {
       const res = await resetUserTotp(m.id);
       setConfirmReset(null);
+      if (res.ok) {
+        toast.success(res.message);
+        router.refresh();
+      } else {
+        toast.error(res.message);
+      }
+    });
+
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const removeMember = (m: UserDTO) =>
+    startTransition(async () => {
+      const res = await deleteUser(m.id);
+      setConfirmDelete(null);
       if (res.ok) {
         toast.success(res.message);
         router.refresh();
@@ -111,7 +124,9 @@ export function TeamManager({
                     </span>
                   )}
               </p>
-              <p className="truncate text-xs text-muted-foreground">{m.email}</p>
+              <p className="truncate text-xs text-muted-foreground">
+                {m.position || m.email}
+              </p>
             </div>
             <span className="hidden text-xs text-muted-foreground sm:inline">
               {m.weeklyCapacityHours}s
@@ -164,6 +179,26 @@ export function TeamManager({
                   <UserCheck className="size-4" />
                 </button>
               ))}
+            {m.id !== currentUserId &&
+              (confirmDelete === m.id ? (
+                <button
+                  onClick={() => removeMember(m)}
+                  disabled={pending}
+                  className="rounded-md px-1.5 py-1 text-xs font-medium text-destructive hover:bg-destructive/10"
+                  title={t.settings.deleteMember}
+                >
+                  {t.settings.confirmDelete}
+                </button>
+              ) : (
+                <button
+                  onClick={() => setConfirmDelete(m.id)}
+                  disabled={pending}
+                  className="rounded-md p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                  title={t.settings.deleteMember}
+                >
+                  <Trash2 className="size-4" />
+                </button>
+              ))}
           </div>
         ))}
       </CardContent>
@@ -188,6 +223,7 @@ function AddMemberDialog({
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [name, setName] = useState("");
+  const [position, setPosition] = useState("");
   const [email, setEmail] = useState("");
   const [role, setRole] = useState("MEMBER");
   const [capacity, setCapacity] = useState("40");
@@ -196,14 +232,21 @@ function AddMemberDialog({
     startTransition(async () => {
       const res = await createUser({
         name: name.trim(),
+        position: position.trim(),
         email: email.trim(),
         role: role as (typeof ROLES)[number],
         weeklyCapacityHours: Number(capacity) || 40,
       });
       if (res.ok) {
-        toast.success(`${res.message} · ${t.settings.tempPassword}: demo1234`);
+        // Temp password only matters if this person will actually sign in.
+        toast.success(
+          email.trim()
+            ? `${res.message} · ${t.settings.tempPassword}: demo1234`
+            : res.message,
+        );
         onOpenChange(false);
         setName("");
+        setPosition("");
         setEmail("");
         setRole("MEMBER");
         setCapacity("40");
@@ -226,7 +269,15 @@ function AddMemberDialog({
             <Input value={name} onChange={(e) => setName(e.target.value)} autoFocus />
           </div>
           <div className="space-y-1.5">
-            <Label>{t.auth.email}</Label>
+            <Label>{t.settings.position}</Label>
+            <Input
+              value={position}
+              onChange={(e) => setPosition(e.target.value)}
+              placeholder={t.settings.positionPlaceholder}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label>{t.settings.emailOptional}</Label>
             <Input
               type="email"
               value={email}
@@ -260,15 +311,17 @@ function AddMemberDialog({
               />
             </div>
           </div>
-          <p className="text-xs text-muted-foreground">
-            {t.settings.tempPassword}: <code>demo1234</code>
-          </p>
+          {email.trim() && (
+            <p className="text-xs text-muted-foreground">
+              {t.settings.tempPassword}: <code>demo1234</code>
+            </p>
+          )}
         </div>
         <DialogFooter>
           <Button variant="ghost" onClick={() => onOpenChange(false)}>
             {t.common.cancel}
           </Button>
-          <Button onClick={submit} disabled={pending || !name || !email}>
+          <Button onClick={submit} disabled={pending || !name}>
             {t.common.add}
           </Button>
         </DialogFooter>
@@ -288,6 +341,7 @@ function EditMemberDialog({
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [role, setRole] = useState("MEMBER");
+  const [position, setPosition] = useState("");
   const [capacity, setCapacity] = useState("40");
   const [leaveFrom, setLeaveFrom] = useState("");
   const [leaveTo, setLeaveTo] = useState("");
@@ -296,6 +350,7 @@ function EditMemberDialog({
   useEffect(() => {
     if (member) {
       setRole(member.role);
+      setPosition(member.position ?? "");
       setCapacity(String(member.weeklyCapacityHours));
       setLeaveFrom(member.unavailableFrom ?? "");
       setLeaveTo(member.unavailableTo ?? "");
@@ -310,6 +365,7 @@ function EditMemberDialog({
     startTransition(async () => {
       const res = await updateUser(member.id, {
         role: role as (typeof ROLES)[number],
+        position: position.trim(),
         weeklyCapacityHours: Number(capacity) || 40,
         unavailableFrom: leaveFrom || null,
         unavailableTo: leaveTo || null,
@@ -332,7 +388,16 @@ function EditMemberDialog({
             {t.settings.editMember} — {member?.name}
           </DialogTitle>
         </DialogHeader>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-1.5">
+          <Label>{t.settings.position}</Label>
+          <Input
+            value={position}
+            onChange={(e) => setPosition(e.target.value)}
+            placeholder={t.settings.positionPlaceholder}
+          />
+        </div>
+
+        <div className="mt-3 grid grid-cols-2 gap-3">
           <div className="space-y-1.5">
             <Label>{t.settings.role}</Label>
             <Select value={role} onValueChange={setRole}>

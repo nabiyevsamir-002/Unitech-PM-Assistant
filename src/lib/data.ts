@@ -432,6 +432,7 @@ export async function getTeam(): Promise<UserDTO[]> {
     name: u.name,
     email: u.email,
     role: u.role,
+    position: u.position,
     avatar: u.avatar,
     weeklyCapacityHours: u.weeklyCapacityHours,
     skills: safeParse<string[]>(u.skills, []),

@@ -5,6 +5,7 @@ export type UserDTO = {
   name: string;
   email: string;
   role: string;
+  position: string | null;
   avatar: string | null;
   weeklyCapacityHours: number;
   skills: string[];
