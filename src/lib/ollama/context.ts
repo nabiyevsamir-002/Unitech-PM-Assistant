@@ -16,6 +16,21 @@ function iso(d: Date | null): string {
   return d ? d.toISOString().slice(0, 10) : "—";
 }
 
+// Excel import stashes budget / actual hours / raw assignee name in Task.customFields
+// (JSON) since they aren't first-class columns. Parse them defensively.
+type TaskExtras = { assigneeName?: string | null; actualHours?: number | null; budget?: number | null };
+function parseExtras(s: unknown): TaskExtras {
+  if (typeof s !== "string" || !s) return {};
+  try {
+    return JSON.parse(s) as TaskExtras;
+  } catch {
+    return {};
+  }
+}
+function num(v: number | null | undefined): string {
+  return v == null ? "—" : String(v);
+}
+
 /**
  * Builds a compact ENGLISH snapshot of live project data for the model to
  * reason over (grounding), plus raw id lists so tools can resolve names → ids.
@@ -39,15 +54,25 @@ export async function buildAiContext(): Promise<AiContext> {
   const overdue = tasks.filter((t) => t.status !== "DONE" && isOverdue(t.dueDate));
   const dueToday = tasks.filter((t) => t.status !== "DONE" && isDueToday(t.dueDate));
 
+  const extrasOf = (t: (typeof tasks)[number]) => parseExtras(t.customFields);
+  const assigneeOf = (t: (typeof tasks)[number]) =>
+    t.assignee?.name ?? extrasOf(t).assigneeName ?? "unassigned";
+
   const lines: string[] = [];
   lines.push(`=== CURRENT PROJECT DATA (today is ${todayBakuISO()}, Baku time) ===`);
 
   lines.push("\nPROJECTS:");
   for (const p of projects) {
-    const total = tasks.filter((t) => t.projectId === p.id).length;
-    const done = tasks.filter((t) => t.projectId === p.id && t.status === "DONE").length;
+    const own = tasks.filter((t) => t.projectId === p.id);
+    const done = own.filter((t) => t.status === "DONE").length;
+    const budget = own.reduce((s, t) => s + (extrasOf(t).budget ?? 0), 0);
+    const estH = own.reduce((s, t) => s + (t.estimatedHours ?? 0), 0);
+    const actH = own.reduce((s, t) => s + (extrasOf(t).actualHours ?? 0), 0);
+    const extra: string[] = [];
+    if (budget > 0) extra.push(`budget=${budget} ${p.currency ?? "AZN"}`);
+    if (estH > 0 || actH > 0) extra.push(`hours est/actual=${estH}/${actH}`);
     lines.push(
-      `- "${p.name}" [${p.status}] client=${p.client?.name ?? "internal"} due=${iso(p.dueDate)} tasks=${done}/${total} done`,
+      `- "${p.name}" [${p.status}] client=${p.client?.name ?? "internal"} due=${iso(p.dueDate)} tasks=${done}/${own.length} done${extra.length ? " " + extra.join(" ") : ""}`,
     );
   }
 
@@ -55,14 +80,26 @@ export async function buildAiContext(): Promise<AiContext> {
   if (overdue.length === 0) lines.push("- none");
   for (const t of overdue) {
     lines.push(
-      `- "${t.title}" project="${t.project.name}" assignee=${t.assignee?.name ?? "unassigned"} priority=${t.priority} due=${iso(t.dueDate)}`,
+      `- "${t.title}" project="${t.project.name}" assignee=${assigneeOf(t)} priority=${t.priority} due=${iso(t.dueDate)}`,
     );
   }
 
   lines.push("\nDUE TODAY:");
   if (dueToday.length === 0) lines.push("- none");
   for (const t of dueToday) {
-    lines.push(`- "${t.title}" assignee=${t.assignee?.name ?? "unassigned"}`);
+    lines.push(`- "${t.title}" assignee=${assigneeOf(t)}`);
+  }
+
+  const overHours = tasks.filter((t) => {
+    const a = extrasOf(t).actualHours;
+    return a != null && t.estimatedHours != null && a > t.estimatedHours;
+  });
+  lines.push("\nTASKS OVER ESTIMATED HOURS (actual > estimated):");
+  if (overHours.length === 0) lines.push("- none");
+  for (const t of overHours) {
+    lines.push(
+      `- "${t.title}" estimated=${num(t.estimatedHours)}h actual=${num(extrasOf(t).actualHours)}h assignee=${assigneeOf(t)}`,
+    );
   }
 
   lines.push("\nTEAM WORKLOAD (assigned open-task hours vs weekly capacity):");
@@ -74,11 +111,14 @@ export async function buildAiContext(): Promise<AiContext> {
     );
   }
 
-  lines.push("\nALL OPEN TASKS (title | project | assignee | status | due):");
+  lines.push(
+    "\nALL OPEN TASKS (title | project | assignee | status | priority | due | est/actual hrs | budget):",
+  );
   const openTasks = tasks.filter((x) => x.status !== "DONE");
   for (const t of openTasks.slice(0, MAX_OPEN_TASKS_LISTED)) {
+    const x = extrasOf(t);
     lines.push(
-      `- ${t.title} | ${t.project.name} | ${t.assignee?.name ?? "unassigned"} | ${t.status} | ${iso(t.dueDate)}`,
+      `- ${t.title} | ${t.project.name} | ${assigneeOf(t)} | ${t.status} | ${t.priority} | ${iso(t.dueDate)} | ${num(t.estimatedHours)}/${num(x.actualHours)}h | ${num(x.budget)}`,
     );
   }
   if (openTasks.length > MAX_OPEN_TASKS_LISTED) {

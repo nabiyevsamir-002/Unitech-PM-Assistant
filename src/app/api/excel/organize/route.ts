@@ -15,7 +15,7 @@ function isDone(status: string): boolean {
   return DONE_WORDS.some((w) => s.includes(w));
 }
 
-const HEADERS = ["№", "Tapşırıq", "Məsul", "Status", "Prioritet", "Başlama", "Bitmə", "Saat", "Qeyd"];
+const HEADERS = ["№", "Tapşırıq", "Məsul", "Status", "Prioritet", "Başlama", "Bitmə", "Təxmini saat", "Faktiki saat", "Büdcə", "Qeyd"];
 
 function toRow(t: ParsedTask): string[] {
   return [
@@ -27,6 +27,8 @@ function toRow(t: ParsedTask): string[] {
     t.start ? formatDate(t.start) : "",
     t.end ? formatDate(t.end) : "",
     t.hours != null ? String(t.hours) : "",
+    t.actualHours != null ? String(t.actualHours) : "",
+    t.budget != null ? String(t.budget) : "",
     t.note,
   ];
 }
@@ -96,13 +98,26 @@ export async function POST(req: Request) {
   lines.push(
     `Statistika: ümumi ${stats.total}, tamamlanmış ${stats.done}, gecikmiş ${stats.overdue}, bu gün bitən ${stats.dueToday}.`,
   );
+  const totalBudget = tasks.reduce((s, t) => s + (t.budget ?? 0), 0);
+  const totalEst = tasks.reduce((s, t) => s + (t.hours ?? 0), 0);
+  const totalActual = tasks.reduce((s, t) => s + (t.actualHours ?? 0), 0);
+  if (totalBudget > 0) lines.push(`Ümumi büdcə: ${totalBudget} AZN.`);
+  if (totalEst > 0 || totalActual > 0)
+    lines.push(`Saatlar: təxmini ${totalEst}, faktiki ${totalActual}.`);
   lines.push("Tapşırıqlar:");
   for (const t of tasks) {
     const flags: string[] = [];
     if (!isDone(t.status) && isOverdue(t.end)) flags.push("GECİKİB");
     else if (!isDone(t.status) && isDueToday(t.end)) flags.push("BUGÜN BİTİR");
+    if (t.actualHours != null && t.hours != null && t.actualHours > t.hours)
+      flags.push("SAAT AŞIMI");
+    const hoursStr =
+      t.hours != null || t.actualHours != null
+        ? ` | saat: ${t.hours ?? "—"}/${t.actualHours ?? "—"} (təxmini/faktiki)`
+        : "";
+    const budgetStr = t.budget != null ? ` | büdcə: ${t.budget} AZN` : "";
     lines.push(
-      `- ${t.title} | məsul: ${t.assignee || "təyin edilməyib"} | status: ${t.status || "—"} | prioritet: ${t.priority || "—"} | bitmə: ${t.end ? formatDate(t.end) : "—"}${flags.length ? " [" + flags.join(", ") + "]" : ""}`,
+      `- ${t.title} | məsul: ${t.assignee || "təyin edilməyib"} | status: ${t.status || "—"} | prioritet: ${t.priority || "—"} | bitmə: ${t.end ? formatDate(t.end) : "—"}${hoursStr}${budgetStr}${flags.length ? " [" + flags.join(", ") + "]" : ""}`,
     );
   }
 

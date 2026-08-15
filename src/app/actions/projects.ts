@@ -178,13 +178,19 @@ export async function createProjectFromTemplate(
 // Diacritic-insensitive normalize so Azerbaijani status/priority/name words
 // match reliably (JS toLowerCase mangles "İ" — normalize+strip fixes it).
 function norm(s: string): string {
-  return s.normalize("NFD").replace(/[̀-ͯ]/g, "").trim().toLowerCase();
+  return s
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/ə/g, "e")
+    .replace(/ı/g, "i")
+    .trim();
 }
 function mapStatus(s: string): string {
   const n = norm(s);
-  if (/(tamamlan|bitdi|hazir|done|complet|closed)/.test(n)) return "DONE";
-  if (/(icrad|progress|davam|isl)/.test(n)) return "IN_PROGRESS";
-  if (/(yoxlam|review|test)/.test(n)) return "REVIEW";
+  if (/(tamamlan|bitdi|hazir|done|complet|closed|gorulub)/.test(n)) return "DONE";
+  if (/(icra|progress|davam|isl|gedir|basland|prosesd)/.test(n)) return "IN_PROGRESS";
+  if (/(yoxlam|review|test|qa)/.test(n)) return "REVIEW";
   return "TODO";
 }
 function mapPriority(s: string): string {
@@ -208,6 +214,8 @@ const importTaskSchema = z.object({
   start: z.string().nullable().optional(),
   end: z.string().nullable().optional(),
   hours: z.number().nullable().optional(),
+  actualHours: z.number().nullable().optional(),
+  budget: z.number().nullable().optional(),
   note: z.string().optional().default(""),
 });
 const importSchema = z.object({
@@ -238,21 +246,51 @@ export async function importExcelProject(
     where: { isActive: true },
     select: { id: true, name: true },
   });
-  const byName = new Map(users.map((u) => [norm(u.name), u.id]));
+  const normUsers = users.map((u) => {
+    const parts = norm(u.name).split(/\s+/).filter(Boolean);
+    return { id: u.id, full: norm(u.name), parts };
+  });
+  // Match "Aygün M." → "Aygün Məmmədova": exact full name, else first name +
+  // surname initial, else first name only. Returns null when nobody matches.
+  const matchUserId = (raw: string): string | null => {
+    const n = norm(raw);
+    if (!n) return null;
+    const exact = normUsers.find((u) => u.full === n);
+    if (exact) return exact.id;
+    const parts = n.replace(/\./g, " ").split(/\s+/).filter(Boolean);
+    const first = parts[0];
+    if (!first) return null;
+    const initial = parts[1]?.[0];
+    const byInitial = normUsers.find(
+      (u) => u.parts[0] === first && (!initial || u.parts[1]?.[0] === initial),
+    );
+    if (byInitial) return byInitial.id;
+    return normUsers.find((u) => u.parts[0] === first)?.id ?? null;
+  };
 
   const taskData = rows
     .filter((r) => r.title.trim() !== "")
-    .map((r, i) => ({
-      title: r.title.trim(),
-      status: mapStatus(r.status ?? ""),
-      priority: mapPriority(r.priority ?? ""),
-      assigneeId: byName.get(norm(r.assignee ?? "")) ?? null,
-      startDate: toDate(r.start),
-      dueDate: toDate(r.end),
-      estimatedHours: typeof r.hours === "number" ? r.hours : null,
-      description: r.note?.trim() || null,
-      orderIndex: i,
-    }));
+    .map((r, i) => {
+      const rawAssignee = (r.assignee ?? "").trim();
+      return {
+        title: r.title.trim(),
+        status: mapStatus(r.status ?? ""),
+        priority: mapPriority(r.priority ?? ""),
+        assigneeId: matchUserId(rawAssignee),
+        startDate: toDate(r.start),
+        dueDate: toDate(r.end),
+        estimatedHours: typeof r.hours === "number" ? r.hours : null,
+        description: r.note?.trim() || null,
+        // Keep the raw assignee name (even when unmatched) + actual hours +
+        // budget so the AI can report them — not first-class columns yet.
+        customFields: JSON.stringify({
+          assigneeName: rawAssignee || null,
+          actualHours: typeof r.actualHours === "number" ? r.actualHours : null,
+          budget: typeof r.budget === "number" ? r.budget : null,
+        }),
+        orderIndex: i,
+      };
+    });
 
   if (taskData.length === 0) {
     return { ok: false, message: "İdxal ediləcək tapşırıq tapılmadı." };

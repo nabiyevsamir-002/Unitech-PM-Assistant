@@ -16,7 +16,9 @@ export type ParsedTask = {
   priority: string;
   start: string | null;
   end: string | null;
-  hours: number | null;
+  hours: number | null; // estimated hours
+  actualHours: number | null; // actual / logged hours
+  budget: number | null;
   note: string;
 };
 

@@ -144,6 +144,24 @@ function parseTasks(rows: ExcelCellValue[][], headerIdx: number): ParsedTask[] {
   const col = (names: string[]) =>
     header.findIndex((h) => names.some((n) => h.includes(n)));
 
+  // Hours: a sheet may have BOTH "Təxmini Saat" (estimated) and "Faktiki Saat"
+  // (actual) — both contain "saat", so disambiguate before falling back.
+  const actualHoursCol = header.findIndex(
+    (h) => (h.includes("saat") || h.includes("hour")) && /(faktiki|actual|real)/.test(h),
+  );
+  const estHoursCol = (() => {
+    const pref = header.findIndex(
+      (h, i) =>
+        i !== actualHoursCol &&
+        (h.includes("saat") || h.includes("hour")) &&
+        /(təxmini|plan|estimat)/.test(h),
+    );
+    if (pref >= 0) return pref;
+    return header.findIndex(
+      (h, i) => i !== actualHoursCol && (h.includes("saat") || h.includes("hour")),
+    );
+  })();
+
   const ci = {
     title: findTitleCol(header),
     assignee: col(["məsul", "icraçı", "assignee"]),
@@ -151,9 +169,13 @@ function parseTasks(rows: ExcelCellValue[][], headerIdx: number): ParsedTask[] {
     priority: col(["prioritet", "priority", "önəm"]),
     start: col(["başlama", "start"]),
     end: col(["bitmə", "son", "end", "due", "deadline"]),
-    hours: col(["saat", "hour"]),
+    hours: estHoursCol,
+    actualHours: actualHoursCol,
+    budget: col(["büdcə", "budget", "məbləğ", "dəyər"]),
     note: col(["qeyd", "note", "şərh"]),
   };
+  const num = (v: ExcelCellValue): number | null =>
+    typeof v === "number" ? v : null;
 
   const out: ParsedTask[] = [];
   for (let i = headerIdx + 1; i < rows.length; i++) {
@@ -168,7 +190,9 @@ function parseTasks(rows: ExcelCellValue[][], headerIdx: number): ParsedTask[] {
       priority: ci.priority >= 0 ? String(r[ci.priority] ?? "") : "",
       start: ci.start >= 0 ? asDate(r[ci.start]) : null,
       end: ci.end >= 0 ? asDate(r[ci.end]) : null,
-      hours: ci.hours >= 0 && typeof r[ci.hours] === "number" ? (r[ci.hours] as number) : null,
+      hours: ci.hours >= 0 ? num(r[ci.hours]) : null,
+      actualHours: ci.actualHours >= 0 ? num(r[ci.actualHours]) : null,
+      budget: ci.budget >= 0 ? num(r[ci.budget]) : null,
       note: ci.note >= 0 ? String(r[ci.note] ?? "") : "",
     });
   }

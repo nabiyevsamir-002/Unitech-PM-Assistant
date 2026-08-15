@@ -33,6 +33,8 @@ type ImportTask = {
   start: string | null;
   end: string | null;
   hours: number | null;
+  actualHours: number | null;
+  budget: number | null;
   note: string;
 };
 type Result = {
