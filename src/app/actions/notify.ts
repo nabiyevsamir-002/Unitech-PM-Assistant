@@ -1,9 +1,10 @@
 "use server";
 
 import { auth } from "@/auth";
-import { canManageUsers } from "@/lib/constants";
+import { canManageUsers, canApprove } from "@/lib/constants";
 import { sendTestNotification, isNotifyConfigured } from "@/lib/notify";
 import { isEmailConfigured } from "@/lib/notify/email";
+import { isTelegramConfigured } from "@/lib/notify/telegram";
 import { sendWeeklyReport } from "@/lib/reports/weekly";
 
 type Result = { ok: boolean; message: string };
@@ -29,30 +30,35 @@ export async function sendTestNotificationAction(): Promise<Result> {
 }
 
 /**
- * Admin-only: build and email the weekly status report right now (the same
- * report a scheduler would send via `POST /api/ai/weekly-report`). Requires
- * SMTP to be configured to actually deliver.
+ * Build the status digest (risks + completed tasks + workload) right now and
+ * push it to every configured channel (Email and/or Telegram). Allowed for any
+ * approver role (OWNER/DEPUTY_OWNER/PM) — this is the PM's own start-of-day
+ * digest, not a user-admin action. Same report a scheduler would send via
+ * `POST /api/ai/weekly-report`.
  */
 export async function sendWeeklyReportNowAction(): Promise<Result> {
   const session = await auth();
   if (!session?.user) return { ok: false, message: "Sessiya bitib." };
-  if (!canManageUsers(session.user.role)) {
+  if (!canApprove(session.user.role)) {
     return { ok: false, message: "Bu əməliyyat üçün icazəniz yoxdur." };
   }
-  if (!isEmailConfigured()) {
+  if (!isEmailConfigured() && !isTelegramConfigured()) {
     return {
       ok: false,
-      message: "E-poçt quraşdırılmayıb (SMTP_HOST / SMTP_USER / SMTP_PASS).",
+      message: "Bildiriş kanalı quraşdırılmayıb (Email və ya Telegram).",
     };
   }
 
   const res = await sendWeeklyReport();
   if (res.delivered) {
+    const where = (res.channels ?? [])
+      .map((c) => (c === "email" ? "Email" : "Telegram"))
+      .join(" + ");
     return {
       ok: true,
       message: res.narrated
-        ? "Həftəlik hesabat e-poçtla göndərildi."
-        : "Həftəlik hesabat göndərildi (AI xülasəsi olmadan — model əlçatmaz idi).",
+        ? `Xülasə göndərildi (${where}).`
+        : `Xülasə göndərildi (${where}) — AI mətni olmadan, model əlçatmaz idi.`,
     };
   }
   return { ok: false, message: `Göndərmə alınmadı: ${res.error ?? "xəta"}.` };

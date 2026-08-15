@@ -14,6 +14,7 @@ import { getWorkload, getBillableSummary, getPendingApprovalCount } from "@/lib/
 import { buildAiContext } from "@/lib/ollama/context";
 import { generateReportText } from "@/lib/ollama/agents";
 import { sendEmail, isEmailConfigured } from "@/lib/notify/email";
+import { sendTelegramMessage, isTelegramConfigured } from "@/lib/notify/telegram";
 
 export type WeeklyReportData = {
   generatedAt: Date;
@@ -239,6 +240,7 @@ export type WeeklyReportResult = {
   ok: boolean;
   delivered: boolean;
   narrated: boolean;
+  channels?: ("email" | "telegram")[];
   error?: string;
 };
 
@@ -250,21 +252,43 @@ export type WeeklyReportResult = {
 export async function sendWeeklyReport(): Promise<WeeklyReportResult> {
   const data = await buildWeeklyReportData();
   const narrative = await generateReportText(data.snapshot);
+  const text = renderWeeklyReportText(data, narrative);
 
-  if (!isEmailConfigured()) {
-    return { ok: true, delivered: false, narrated: !!narrative, error: "not_configured" };
+  const emailOn = isEmailConfigured();
+  const telegramOn = isTelegramConfigured();
+  if (!emailOn && !telegramOn) {
+    return { ok: true, delivered: false, narrated: !!narrative, channels: [], error: "not_configured" };
   }
 
-  const res = await sendEmail({
-    subject: `UniTech PM — həftəlik hesabat (${formatDate(data.generatedAt)})`,
-    html: renderWeeklyReportHtml(data, narrative),
-    text: renderWeeklyReportText(data, narrative),
-  });
+  // Deliver to every configured channel; success if at least one lands.
+  const channels: ("email" | "telegram")[] = [];
 
+  if (emailOn) {
+    const res = await sendEmail({
+      subject: `UniTech PM — status hesabatı (${formatDate(data.generatedAt)})`,
+      html: renderWeeklyReportHtml(data, narrative),
+      text,
+    });
+    if (res.ok) channels.push("email");
+  }
+
+  if (telegramOn) {
+    // Telegram uses HTML parse mode + a 4096-char cap — escape and trim.
+    const tgBody = text
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .slice(0, 3900);
+    const res = await sendTelegramMessage(tgBody);
+    if (res.ok) channels.push("telegram");
+  }
+
+  const delivered = channels.length > 0;
   return {
-    ok: res.ok,
-    delivered: res.ok,
+    ok: delivered,
+    delivered,
     narrated: !!narrative,
-    error: res.ok ? undefined : res.error,
+    channels,
+    error: delivered ? undefined : "send_failed",
   };
 }

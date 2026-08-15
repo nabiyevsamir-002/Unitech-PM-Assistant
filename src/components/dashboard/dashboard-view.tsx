@@ -12,6 +12,7 @@ import {
   Rocket,
   ArrowRight,
   Radar,
+  Send,
 } from "lucide-react";
 import { toast } from "sonner";
 import { MetricCard } from "./metric-card";
@@ -22,6 +23,7 @@ import { Button } from "@/components/ui/button";
 import { useI18n } from "@/components/providers/i18n-provider";
 import { cn } from "@/lib/utils";
 import { runAgentScanAction } from "@/app/actions/agents";
+import { sendWeeklyReportNowAction } from "@/app/actions/notify";
 import type { ApprovalDTO, TaskDTO } from "@/lib/types";
 
 export function DashboardView({
@@ -60,6 +62,14 @@ export function DashboardView({
       } else {
         toast.error(res.message);
       }
+    });
+
+  const [sendingDigest, startDigest] = useTransition();
+  const sendDigest = () =>
+    startDigest(async () => {
+      const res = await sendWeeklyReportNowAction();
+      if (res.ok) toast.success(res.message);
+      else toast.error(res.message);
     });
 
   return (
@@ -134,18 +144,32 @@ export function DashboardView({
             </h2>
           </div>
           {canApprove && (
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={runScan}
-              disabled={scanning}
-              title={t.ai.scanIdle}
-            >
-              <Radar className={cn("size-4", scanning && "animate-spin")} />
-              <span className="hidden sm:inline">
-                {scanning ? t.ai.scanning : t.ai.scan}
-              </span>
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={sendDigest}
+                disabled={sendingDigest}
+                title={t.dashboard.sendDigest}
+              >
+                <Send className={cn("size-4", sendingDigest && "animate-pulse")} />
+                <span className="hidden sm:inline">
+                  {sendingDigest ? t.dashboard.sendingDigest : t.dashboard.sendDigest}
+                </span>
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={runScan}
+                disabled={scanning}
+                title={t.ai.scanIdle}
+              >
+                <Radar className={cn("size-4", scanning && "animate-spin")} />
+                <span className="hidden sm:inline">
+                  {scanning ? t.ai.scanning : t.ai.scan}
+                </span>
+              </Button>
+            </div>
           )}
         </div>
         {topApproval ? (

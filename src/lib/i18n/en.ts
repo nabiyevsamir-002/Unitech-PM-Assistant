@@ -192,6 +192,8 @@ export const en: Dictionary = {
     pendingApprovals: "Pending approvals",
     aiSuggestion: "AI suggests — pending approval",
     aiSuggestionEmpty: "No pending AI suggestions right now.",
+    sendDigest: "Send me the digest",
+    sendingDigest: "Sending…",
     boardPreview: "Board preview",
     viewFullBoard: "View full board",
     recentActivity: "Recent activity",

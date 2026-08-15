@@ -192,6 +192,8 @@ export const az = {
     pendingApprovals: "Gözləyən təsdiqlər",
     aiSuggestion: "AI təklif edir — təsdiq gözləyir",
     aiSuggestionEmpty: "Hazırda AI-dan gözləyən təklif yoxdur.",
+    sendDigest: "Xülasəni mənə göndər",
+    sendingDigest: "Göndərilir…",
     boardPreview: "Lövhəyə baxış",
     viewFullBoard: "Tam lövhəyə bax",
     recentActivity: "Son fəaliyyət",
