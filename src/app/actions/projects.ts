@@ -25,6 +25,19 @@ async function requireCreator() {
   return { ok: true as const, session };
 }
 
+/**
+ * Lightweight project list for the AI panel's "focus" picker (id + name only).
+ * Any signed-in user may read it; returns newest-first. Empty when unauthenticated.
+ */
+export async function listProjectsForAi(): Promise<{ id: string; name: string }[]> {
+  const session = await auth();
+  if (!session?.user) return [];
+  return prisma.project.findMany({
+    orderBy: { createdAt: "desc" },
+    select: { id: true, name: true },
+  });
+}
+
 function revalidateProjectViews() {
   revalidatePath("/projects");
   revalidatePath("/board");

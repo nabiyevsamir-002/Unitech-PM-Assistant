@@ -26,12 +26,14 @@ export async function POST(req: Request) {
   });
   if (!rl.ok) return tooManyRequests(rl);
 
-  let body: { messages?: ChatMessage[] };
+  let body: { messages?: ChatMessage[]; projectId?: string };
   try {
     body = await req.json();
   } catch {
     return new Response("bad request", { status: 400 });
   }
+  const focusProjectId =
+    typeof body.projectId === "string" && body.projectId ? body.projectId : undefined;
 
   const history = (body.messages ?? [])
     .filter((m) => m.role === "user" || m.role === "assistant")
@@ -45,7 +47,7 @@ export async function POST(req: Request) {
   // Build live context once. Only run the (slower) tool-calling planning pass
   // when the message looks like an action request; read-only questions answer
   // directly from the grounded snapshot in a single streaming pass.
-  const ctx = await buildAiContext();
+  const ctx = await buildAiContext(focusProjectId);
   const lastUser = history[history.length - 1]?.content ?? "";
   const plan = looksLikeAction(lastUser)
     ? await planPhase(history, ctx)

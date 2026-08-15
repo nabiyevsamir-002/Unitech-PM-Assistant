@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Send, Sparkles, AlertCircle } from "lucide-react";
+import { Send, Sparkles, AlertCircle, Target } from "lucide-react";
 import { toast } from "sonner";
 import {
   Sheet,
@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { useI18n } from "@/components/providers/i18n-provider";
+import { listProjectsForAi } from "@/app/actions/projects";
 
 type ChatMessage = { role: "user" | "assistant"; content: string };
 
@@ -30,15 +31,20 @@ export function AiPanel({
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [aiOnline, setAiOnline] = useState<boolean | null>(null);
+  const [projects, setProjects] = useState<{ id: string; name: string }[]>([]);
+  const [focusId, setFocusId] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // Health check when the panel opens.
+  // Health check + load the project list for the focus picker when the panel opens.
   useEffect(() => {
     if (!open) return;
     fetch("/api/ai/status")
       .then((r) => r.json())
       .then((d) => setAiOnline(!!d.online))
       .catch(() => setAiOnline(false));
+    listProjectsForAi()
+      .then(setProjects)
+      .catch(() => setProjects([]));
   }, [open]);
 
   useEffect(() => {
@@ -60,7 +66,7 @@ export function AiPanel({
       const res = await fetch("/api/ai/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: next, lang }),
+        body: JSON.stringify({ messages: next, lang, projectId: focusId || undefined }),
       });
 
       if (!res.ok || !res.body) {
@@ -135,6 +141,24 @@ export function AiPanel({
           </SheetTitle>
         </SheetHeader>
 
+        {projects.length > 0 && (
+          <div className="flex items-center gap-2 border-b px-5 py-2.5">
+            <Target className="size-4 shrink-0 text-muted-foreground" />
+            <select
+              value={focusId}
+              onChange={(e) => setFocusId(e.target.value)}
+              className="min-w-0 flex-1 truncate rounded-md border bg-background px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-ring"
+            >
+              <option value="">{t.ai.allProjects}</option>
+              {projects.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
         <div
           ref={scrollRef}
           className="flex-1 space-y-4 overflow-y-auto thin-scrollbar px-5 py-5"
@@ -142,6 +166,9 @@ export function AiPanel({
           {messages.length === 0 && (
             <div className="rounded-xl border bg-accent/40 p-4 text-sm text-accent-foreground">
               {t.ai.greeting}
+              {projects.length > 1 && (
+                <p className="mt-2 text-xs text-muted-foreground">{t.ai.focusHint}</p>
+              )}
             </div>
           )}
 

@@ -413,6 +413,8 @@ export const az = {
     scanDone: "Yoxlama tamamlandı",
     scanNoFindings: "Yeni təklif yoxdur — hər şey qaydasındadır.",
     scanCreated: "yeni təklif hazırlandı",
+    allProjects: "Bütün layihələr",
+    focusHint: "Sual verməzdən əvvəl bir layihə seç — AI yalnız ona baxacaq (qarışıqlıq olmaz).",
   },
   attachments: {
     tab: "Fayllar",

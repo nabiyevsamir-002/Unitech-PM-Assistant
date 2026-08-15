@@ -52,8 +52,8 @@ function num(v: number | null | undefined): string {
  * reason over (grounding), plus raw id lists so tools can resolve names → ids.
  * All date/overdue math is computed here in code, never by the LLM.
  */
-export async function buildAiContext(): Promise<AiContext> {
-  const [projects, tasks, users] = await Promise.all([
+export async function buildAiContext(focusProjectId?: string): Promise<AiContext> {
+  const [allProjects, allTasks, users] = await Promise.all([
     prisma.project.findMany({ include: { client: true } }),
     prisma.task.findMany({ include: { assignee: true, project: true } }),
     prisma.user.findMany({
@@ -67,6 +67,16 @@ export async function buildAiContext(): Promise<AiContext> {
     }),
   ]);
 
+  // Project FOCUS: when the user picks a project in the AI panel, scope the whole
+  // snapshot to it so 30 projects never bleed into one another (and the open-task
+  // list can't be truncated away). No focus = portfolio view over every project.
+  const focusProject =
+    focusProjectId ? allProjects.find((p) => p.id === focusProjectId) ?? null : null;
+  const projects = focusProject ? [focusProject] : allProjects;
+  const tasks = focusProject
+    ? allTasks.filter((t) => t.projectId === focusProject.id)
+    : allTasks;
+
   const overdue = tasks.filter((t) => t.status !== "DONE" && isOverdue(t.dueDate));
   const dueToday = tasks.filter((t) => t.status !== "DONE" && isDueToday(t.dueDate));
 
@@ -76,14 +86,21 @@ export async function buildAiContext(): Promise<AiContext> {
 
   const lines: string[] = [];
   lines.push(`=== CURRENT PROJECT DATA (today is ${todayBakuISO()}, Baku time) ===`);
-  lines.push(
-    "NOTE: each project is separate — when the user names ONE project, use only that project's tasks.",
-  );
+  if (focusProject) {
+    lines.push(
+      `FOCUS: The user is asking ONLY about the project "${focusProject.name}". Base your whole answer on this project alone; ignore every other project.`,
+    );
+  } else {
+    lines.push(
+      'NOTE: multiple projects below, each separate. If the user names ONE project, use only its tasks. For "which projects are at risk", rank by each project\'s risk flags (overdue / anomalies) and the OVERDUE + ANOMALIES sections.',
+    );
+  }
 
   lines.push("\nPROJECTS:");
   for (const p of projects) {
     const own = tasks.filter((t) => t.projectId === p.id);
     const done = own.filter((t) => t.status === "DONE").length;
+    const odCount = own.filter((t) => t.status !== "DONE" && isOverdue(t.dueDate)).length;
     const cur = p.currency ?? "AZN";
     const updBudget = own.reduce((s, t) => s + (extrasOf(t).budget ?? 0), 0);
     const initBudget = own.reduce(
@@ -104,6 +121,7 @@ export async function buildAiContext(): Promise<AiContext> {
       );
     }
     if (estH > 0 || actH > 0) extra.push(`hours (time): estimated=${estH}, actual=${actH}`);
+    if (odCount > 0) extra.push(`RISK: ${odCount} overdue task(s)`);
     lines.push(
       `- "${p.name}" [${p.status}] client=${p.client?.name ?? "internal"} due=${iso(p.dueDate)} tasks=${done}/${own.length} done${extra.length ? " | " + extra.join(" | ") : ""}`,
     );

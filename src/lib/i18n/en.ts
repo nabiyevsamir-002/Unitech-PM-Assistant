@@ -413,6 +413,8 @@ export const en: Dictionary = {
     scanDone: "Scan complete",
     scanNoFindings: "No new proposals — everything looks fine.",
     scanCreated: "new proposals prepared",
+    allProjects: "All projects",
+    focusHint: "Pick a project before asking — the AI will look only at that one (no mix-ups).",
   },
   attachments: {
     tab: "Files",
