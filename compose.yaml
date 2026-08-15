@@ -118,6 +118,9 @@ services:
       SMTP_PASS: ${SMTP_PASS:-}
       SMTP_FROM: ${SMTP_FROM:-}
       NOTIFY_EMAIL_TO: ${NOTIFY_EMAIL_TO:-}
+      # Shared secret for scheduler-triggered endpoints (risk-alert, scan,
+      # weekly-report) — sent as the `x-cron-secret` header by an external cron.
+      CRON_SECRET: ${CRON_SECRET:-}
       # Optional OneDrive/Microsoft Graph Excel sync (5d) — no-op if unset.
       MSGRAPH_TENANT_ID: ${MSGRAPH_TENANT_ID:-}
       MSGRAPH_CLIENT_ID: ${MSGRAPH_CLIENT_ID:-}

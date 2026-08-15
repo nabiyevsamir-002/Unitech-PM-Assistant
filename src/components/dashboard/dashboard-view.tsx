@@ -13,6 +13,7 @@ import {
   ArrowRight,
   Radar,
   Send,
+  ShieldAlert,
 } from "lucide-react";
 import { toast } from "sonner";
 import { MetricCard } from "./metric-card";
@@ -23,7 +24,7 @@ import { Button } from "@/components/ui/button";
 import { useI18n } from "@/components/providers/i18n-provider";
 import { cn } from "@/lib/utils";
 import { runAgentScanAction } from "@/app/actions/agents";
-import { sendWeeklyReportNowAction } from "@/app/actions/notify";
+import { sendWeeklyReportNowAction, sendRiskAlertNowAction } from "@/app/actions/notify";
 import type { ApprovalDTO, TaskDTO } from "@/lib/types";
 
 export function DashboardView({
@@ -68,6 +69,14 @@ export function DashboardView({
   const sendDigest = () =>
     startDigest(async () => {
       const res = await sendWeeklyReportNowAction();
+      if (res.ok) toast.success(res.message);
+      else toast.error(res.message);
+    });
+
+  const [checkingRisks, startRisks] = useTransition();
+  const checkRisks = () =>
+    startRisks(async () => {
+      const res = await sendRiskAlertNowAction();
       if (res.ok) toast.success(res.message);
       else toast.error(res.message);
     });
@@ -145,6 +154,18 @@ export function DashboardView({
           </div>
           {canApprove && (
             <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={checkRisks}
+                disabled={checkingRisks}
+                title={t.dashboard.checkRisks}
+              >
+                <ShieldAlert className={cn("size-4", checkingRisks && "animate-pulse")} />
+                <span className="hidden sm:inline">
+                  {checkingRisks ? t.dashboard.checkingRisks : t.dashboard.checkRisks}
+                </span>
+              </Button>
               <Button
                 size="sm"
                 variant="outline"

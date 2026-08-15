@@ -202,6 +202,8 @@ export const en: Dictionary = {
     aiSuggestionEmpty: "No pending AI suggestions right now.",
     sendDigest: "Send me the digest",
     sendingDigest: "Sending…",
+    checkRisks: "Check risks",
+    checkingRisks: "Checking…",
     boardPreview: "Board preview",
     viewFullBoard: "View full board",
     recentActivity: "Recent activity",

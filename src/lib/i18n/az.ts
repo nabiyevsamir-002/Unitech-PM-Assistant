@@ -202,6 +202,8 @@ export const az = {
     aiSuggestionEmpty: "Hazırda AI-dan gözləyən təklif yoxdur.",
     sendDigest: "Xülasəni mənə göndər",
     sendingDigest: "Göndərilir…",
+    checkRisks: "Riskləri yoxla",
+    checkingRisks: "Yoxlanılır…",
     boardPreview: "Lövhəyə baxış",
     viewFullBoard: "Tam lövhəyə bax",
     recentActivity: "Son fəaliyyət",
