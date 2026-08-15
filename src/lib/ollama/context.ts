@@ -65,14 +65,22 @@ export async function buildAiContext(): Promise<AiContext> {
   for (const p of projects) {
     const own = tasks.filter((t) => t.projectId === p.id);
     const done = own.filter((t) => t.status === "DONE").length;
-    const budget = own.reduce((s, t) => s + (extrasOf(t).budget ?? 0), 0);
+    const cur = p.currency ?? "AZN";
+    const budgetTotal = own.reduce((s, t) => s + (extrasOf(t).budget ?? 0), 0);
+    // "Spent" budget = money committed to tasks already started (done or in-progress).
+    const budgetSpent = own
+      .filter((t) => t.status === "DONE" || t.status === "IN_PROGRESS")
+      .reduce((s, t) => s + (extrasOf(t).budget ?? 0), 0);
     const estH = own.reduce((s, t) => s + (t.estimatedHours ?? 0), 0);
     const actH = own.reduce((s, t) => s + (extrasOf(t).actualHours ?? 0), 0);
     const extra: string[] = [];
-    if (budget > 0) extra.push(`budget=${budget} ${p.currency ?? "AZN"}`);
-    if (estH > 0 || actH > 0) extra.push(`hours est/actual=${estH}/${actH}`);
+    if (budgetTotal > 0)
+      extra.push(
+        `budget in ${cur} (money): total=${budgetTotal}, spent(started tasks)=${budgetSpent}, remaining=${budgetTotal - budgetSpent}`,
+      );
+    if (estH > 0 || actH > 0) extra.push(`hours (time): estimated=${estH}, actual=${actH}`);
     lines.push(
-      `- "${p.name}" [${p.status}] client=${p.client?.name ?? "internal"} due=${iso(p.dueDate)} tasks=${done}/${own.length} done${extra.length ? " " + extra.join(" ") : ""}`,
+      `- "${p.name}" [${p.status}] client=${p.client?.name ?? "internal"} due=${iso(p.dueDate)} tasks=${done}/${own.length} done${extra.length ? " | " + extra.join(" | ") : ""}`,
     );
   }
 
@@ -109,6 +117,22 @@ export async function buildAiContext(): Promise<AiContext> {
     lines.push(
       `- ${u.name} (${u.role}): ${assigned}h / ${u.weeklyCapacityHours}h, ${u.assignedTasks.length} open tasks${flag}`,
     );
+  }
+
+  // Per-person totals across EVERY task (incl. completed and unregistered
+  // assignees), so "how many tasks does X have" counts done ones too.
+  const byAssignee = new Map<string, { total: number; open: number; done: number }>();
+  for (const t of tasks) {
+    const name = assigneeOf(t);
+    const e = byAssignee.get(name) ?? { total: 0, open: 0, done: 0 };
+    e.total += 1;
+    if (t.status === "DONE") e.done += 1;
+    else e.open += 1;
+    byAssignee.set(name, e);
+  }
+  lines.push("\nTASKS PER ASSIGNEE (every task incl. completed — total / open / done):");
+  for (const [name, c] of byAssignee) {
+    lines.push(`- ${name}: ${c.total} total (${c.open} open, ${c.done} done)`);
   }
 
   lines.push(

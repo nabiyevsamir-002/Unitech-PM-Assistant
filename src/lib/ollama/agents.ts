@@ -49,7 +49,8 @@ function answerSystemPrompt(snapshot: string, docContext = ""): string {
   const docNote = docContext
     ? "\nSome COMPANY DOCUMENTS are provided below. When the question relates to them, base your answer on those documents. If they don't cover it, use the project data or say you don't have that information."
     : "";
-  return `You are the UniTech Development project-management assistant. Answer the user ONLY in Azerbaijani, concise, friendly, plain business language. Keep it SHORT: at most 4-5 sentences (use a short bullet list only if it genuinely helps), answer only what was asked, and stop — do not pad or repeat. Base every fact strictly on the DATA below (it is already correct — do not recompute dates). Never invent tasks, people or projects. Never mention tools, JSON, functions or internal steps. Do not use English words.${docNote}
+  return `You are the UniTech Development project-management assistant. Answer the user ONLY in Azerbaijani, concise, friendly, plain business language. Keep it SHORT: at most 4-5 sentences (use a short bullet list only if it genuinely helps), answer only what was asked, and stop — do not pad or repeat. Base every fact strictly on the DATA below (it is already correct — do not recompute dates). Never invent tasks, people or projects. Never mention tools, JSON, functions or internal steps. Do not use English words.
+IMPORTANT distinctions: BUDGET/cost questions are about MONEY — answer in the project currency (AZN), using the budget total/spent/remaining figures; NEVER answer a money question with hours. HOURS are time (estimated vs actual) — a separate thing from money. For "how many tasks does a person have", use TASKS PER ASSIGNEE (it counts completed tasks too), not just open ones. State each fact ONCE — never restate the same number in different words (e.g. do not say both "3 completed" and "3 of 10 done").${docNote}
 
 ${snapshot}${docContext}`;
 }
@@ -234,7 +235,7 @@ export async function excelInsights(grounding: string): Promise<string> {
         {
           role: "system",
           content:
-            "You are a project-management analyst for UniTech Development. Using ONLY the task data below, write a SHORT status analysis in AZERBAIJANI for the project manager. Use short bullet points covering: 1) ümumi vəziyyət, 2) gecikmiş və riskli tapşırıqlar, 3) komanda yükü (kim çox iş götürüb), 4) 2-3 qısa tövsiyə. Plain business language. Do not invent anything, do not recompute dates. Azerbaijani only, no English words.",
+            "You are a project-management analyst for UniTech Development. Using ONLY the task data below, write a SHORT status analysis in AZERBAIJANI for the project manager. Use short bullet points covering: 1) ümumi vəziyyət, 2) gecikmiş və riskli tapşırıqlar, 3) komanda yükü (kim çox iş götürüb), 4) 2-3 qısa tövsiyə. Plain business language. Do not invent anything, do not recompute dates. Budget is MONEY (AZN); hours are TIME — keep them separate, never express budget in hours. State each fact only ONCE — do not repeat the same number in different wording. Azerbaijani only, no English words.",
         },
         { role: "user", content: grounding },
       ],
