@@ -12,6 +12,7 @@ import {
   Mic,
   Volume2,
   Trash2,
+  Loader2,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -25,6 +26,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { useI18n } from "@/components/providers/i18n-provider";
 import { listProjectsForAi } from "@/app/actions/projects";
+import { startRecording, type Recorder } from "@/lib/azure/record";
 
 type ChatMessage = { role: "user" | "assistant"; content: string };
 
@@ -72,12 +74,19 @@ export function AiPanel({
   const [speakingIdx, setSpeakingIdx] = useState<number | null>(null);
   const [voiceIn, setVoiceIn] = useState(false);
   const [voiceOut, setVoiceOut] = useState(false);
+  const [transcribing, setTranscribing] = useState(false);
+  // Azure Speech (real Azerbaijani voice) when configured; else browser fallback.
+  const [azureVoice, setAzureVoice] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const dictationBaseRef = useRef("");
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const recorderRef = useRef<Recorder | null>(null);
+  // Bumped on every stop/new play so a slow TTS fetch can't resurrect stale audio.
+  const speakTokenRef = useRef(0);
   // Only write to storage after a real user action — never during hydration
   // (otherwise the mount-time effect would clobber the saved chat with []).
   const touchedRef = useRef(false);
@@ -86,6 +95,15 @@ export function AiPanel({
   useEffect(() => {
     setVoiceIn(!!getSpeechRecognition());
     setVoiceOut(typeof window !== "undefined" && "speechSynthesis" in window);
+  }, []);
+
+  // Ask the server whether Azure Speech is configured (no secrets returned). If
+  // so, voice uses real Azerbaijani STT/TTS; otherwise the browser Web Speech API.
+  useEffect(() => {
+    fetch("/api/ai/speech/config")
+      .then((r) => r.json())
+      .then((d) => setAzureVoice(!!d.configured))
+      .catch(() => setAzureVoice(false));
   }, []);
 
   // Restore the last conversation on load (survives refresh / tab switch).
@@ -131,9 +149,17 @@ export function AiPanel({
     if (open) return;
     abortRef.current?.abort();
     recognitionRef.current?.stop();
+    recorderRef.current?.cancel();
+    recorderRef.current = null;
+    speakTokenRef.current++;
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current = null;
+    }
     if (typeof window !== "undefined") window.speechSynthesis?.cancel();
     setSpeakingIdx(null);
     setListening(false);
+    setTranscribing(false);
   }, [open]);
 
   useEffect(() => {
@@ -232,7 +258,51 @@ export function AiPanel({
     inputRef.current?.focus();
   };
 
+  const appendTranscript = (heard: string) => {
+    const clean = heard.trim();
+    if (!clean) return;
+    setInput((prev) => (prev.trim() ? `${prev.trim()} ${clean}` : clean));
+  };
+
+  // Azure path: record a WAV clip, then send it to the server to transcribe.
+  const toggleAzureDictation = async () => {
+    if (listening) {
+      const rec = recorderRef.current;
+      recorderRef.current = null;
+      setListening(false);
+      if (!rec) return;
+      setTranscribing(true);
+      try {
+        const wav = await rec.stop();
+        const res = await fetch(`/api/ai/stt?lang=${lang}`, {
+          method: "POST",
+          headers: { "Content-Type": "audio/wav" },
+          body: wav,
+        });
+        const data = (await res.json()) as { ok?: boolean; text?: string };
+        if (data.ok && data.text) appendTranscript(data.text);
+        else toast.error(t.ai.voiceError);
+      } catch {
+        toast.error(t.ai.voiceError);
+      } finally {
+        setTranscribing(false);
+        inputRef.current?.focus();
+      }
+      return;
+    }
+    try {
+      recorderRef.current = await startRecording();
+      setListening(true);
+    } catch {
+      toast.error(t.ai.voiceUnsupported);
+    }
+  };
+
   const toggleDictation = () => {
+    if (azureVoice) {
+      void toggleAzureDictation();
+      return;
+    }
     if (listening) {
       recognitionRef.current?.stop();
       return;
@@ -270,29 +340,82 @@ export function AiPanel({
     rec.start();
   };
 
-  const speak = (index: number, text: string) => {
-    if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
-    const synth = window.speechSynthesis;
-    // Clicking the speaker on the message that is playing stops it.
-    if (speakingIdx === index) {
-      synth.cancel();
-      setSpeakingIdx(null);
+  const stopPlayback = () => {
+    speakTokenRef.current++;
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current = null;
+    }
+    if (typeof window !== "undefined") window.speechSynthesis?.cancel();
+    setSpeakingIdx(null);
+  };
+
+  // Browser Web Speech fallback (no native Azerbaijani voice → Turkish).
+  const browserSpeak = (text: string, token: number) => {
+    if (typeof window === "undefined" || !("speechSynthesis" in window)) {
+      if (token === speakTokenRef.current) setSpeakingIdx(null);
       return;
     }
-    synth.cancel();
+    const synth = window.speechSynthesis;
     const u = new SpeechSynthesisUtterance(text);
     const voices = synth.getVoices();
     const byPrefix = (p: string) =>
       voices.find((v) => v.lang?.toLowerCase().startsWith(p));
-    // Prefer Azerbaijani; Turkish is phonetically close as a fallback.
     const picked =
       lang === "en" ? byPrefix("en") : byPrefix("az") || byPrefix("tr");
     if (picked) u.voice = picked;
     u.lang = picked?.lang || (lang === "en" ? "en-US" : "az-AZ");
-    u.onend = () => setSpeakingIdx(null);
-    u.onerror = () => setSpeakingIdx(null);
-    setSpeakingIdx(index);
+    u.onend = () => {
+      if (token === speakTokenRef.current) setSpeakingIdx(null);
+    };
+    u.onerror = () => {
+      if (token === speakTokenRef.current) setSpeakingIdx(null);
+    };
     synth.speak(u);
+  };
+
+  const speak = async (index: number, text: string) => {
+    // Clicking the speaker on the message that is playing stops it.
+    if (speakingIdx === index) {
+      stopPlayback();
+      return;
+    }
+    stopPlayback();
+    const token = ++speakTokenRef.current;
+    setSpeakingIdx(index);
+
+    if (azureVoice) {
+      try {
+        const res = await fetch("/api/ai/tts", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text, lang }),
+        });
+        if (token !== speakTokenRef.current) return; // stopped meanwhile
+        if (res.ok) {
+          const blob = await res.blob();
+          if (token !== speakTokenRef.current) return;
+          const url = URL.createObjectURL(blob);
+          const audio = new Audio(url);
+          audioRef.current = audio;
+          const done = () => {
+            URL.revokeObjectURL(url);
+            if (token === speakTokenRef.current) {
+              setSpeakingIdx(null);
+              audioRef.current = null;
+            }
+          };
+          audio.onended = done;
+          audio.onerror = done;
+          await audio.play();
+          return;
+        }
+        // Non-OK (e.g. 503 not configured) → fall through to the browser voice.
+      } catch {
+        if (token !== speakTokenRef.current) return;
+      }
+    }
+    browserSpeak(text, token);
   };
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -417,7 +540,7 @@ export function AiPanel({
               )}
 
               {/* Read an AI answer aloud */}
-              {m.role === "assistant" && m.content && voiceOut && (
+              {m.role === "assistant" && m.content && (voiceOut || azureVoice) && (
                 <button
                   type="button"
                   onClick={() => speak(i, m.content)}
@@ -451,11 +574,14 @@ export function AiPanel({
               onKeyDown={onKeyDown}
               placeholder={t.ai.placeholder}
               rows={2}
-              className={cn("resize-none", voiceIn ? "pr-20" : "pr-12")}
+              className={cn(
+                "resize-none",
+                voiceIn || azureVoice ? "pr-20" : "pr-12",
+              )}
             />
 
             {/* Dictate (voice → text) */}
-            {voiceIn && (
+            {(voiceIn || azureVoice) && (
               <Button
                 type="button"
                 size="icon"
@@ -465,11 +591,21 @@ export function AiPanel({
                   listening && "animate-pulse",
                 )}
                 onClick={toggleDictation}
-                disabled={busy}
+                disabled={busy || transcribing}
                 aria-label={listening ? t.ai.dictateStop : t.ai.dictate}
-                title={listening ? t.ai.dictateStop : t.ai.dictate}
+                title={
+                  transcribing
+                    ? t.ai.transcribing
+                    : listening
+                      ? t.ai.dictateStop
+                      : t.ai.dictate
+                }
               >
-                <Mic className="size-4" />
+                {transcribing ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : (
+                  <Mic className="size-4" />
+                )}
               </Button>
             )}
 

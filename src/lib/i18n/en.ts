@@ -432,6 +432,7 @@ export const en: Dictionary = {
     voiceUnsupported: "Your browser doesn't support voice input (Chrome recommended).",
     voiceError: "Couldn't recognise speech — try again.",
     clearChat: "Clear chat",
+    transcribing: "Transcribing…",
   },
   attachments: {
     tab: "Files",

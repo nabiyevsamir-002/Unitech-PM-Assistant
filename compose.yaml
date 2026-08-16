@@ -121,6 +121,12 @@ services:
       # Shared secret for scheduler-triggered endpoints (risk-alert, scan,
       # weekly-report) — sent as the `x-cron-secret` header by an external cron.
       CRON_SECRET: ${CRON_SECRET:-}
+      # Optional Azure Speech (real Azerbaijani STT+TTS) — no-op if unset; the
+      # app falls back to the browser's Web Speech API. From the Azure portal →
+      # Speech resource → "Keys and Endpoint".
+      AZURE_SPEECH_KEY: ${AZURE_SPEECH_KEY:-}
+      AZURE_SPEECH_REGION: ${AZURE_SPEECH_REGION:-}
+      AZURE_TTS_VOICE: ${AZURE_TTS_VOICE:-az-AZ-BanuNeural}
       # Optional OneDrive/Microsoft Graph Excel sync (5d) — no-op if unset.
       MSGRAPH_TENANT_ID: ${MSGRAPH_TENANT_ID:-}
       MSGRAPH_CLIENT_ID: ${MSGRAPH_CLIENT_ID:-}

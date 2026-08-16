@@ -432,6 +432,7 @@ export const az = {
     voiceUnsupported: "Brauzeriniz səslə yazmağı dəstəkləmir (Chrome tövsiyə olunur).",
     voiceError: "Səs tanınmadı — yenidən cəhd edin.",
     clearChat: "Söhbəti təmizlə",
+    transcribing: "Səs mətnə çevrilir…",
   },
   attachments: {
     tab: "Fayllar",
