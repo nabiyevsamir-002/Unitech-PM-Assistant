@@ -1,15 +1,11 @@
 import { auth } from "@/auth";
-import { getDashboardData, getOnboardingState } from "@/lib/data";
-import { canApprove, canManageUsers } from "@/lib/constants";
+import { getDashboardData } from "@/lib/data";
+import { canApprove } from "@/lib/constants";
 import { DashboardView } from "@/components/dashboard/dashboard-view";
 
 export default async function DashboardPage() {
   const session = await auth();
-  const isAdmin = canManageUsers(session?.user?.role);
-  const [data, onboarding] = await Promise.all([
-    getDashboardData(),
-    isAdmin ? getOnboardingState() : Promise.resolve(null),
-  ]);
+  const data = await getDashboardData();
 
   return (
     <DashboardView
@@ -18,7 +14,6 @@ export default async function DashboardPage() {
       topApproval={data.topApproval}
       boardTasks={data.boardTasks}
       canApprove={canApprove(session?.user?.role)}
-      showSetupBanner={isAdmin && !!onboarding?.needsSetup}
     />
   );
 }

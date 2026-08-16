@@ -1,9 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
 import { useTheme } from "next-themes";
-import { Sun, Moon, Monitor, Circle, Rocket, ArrowRight } from "lucide-react";
+import { Sun, Moon, Monitor, Circle } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -169,29 +168,6 @@ export function SettingsView({
 
         {/* Notifications / integrations (admins only) */}
         {canManage && <NotificationsCard channels={notifyChannels} />}
-
-        {/* Setup wizard (admins only) */}
-        {canManage && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-base">
-                <Rocket className="size-4.5 text-primary" />
-                {t.onboarding.launch}
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="flex items-center justify-between gap-3">
-              <p className="text-sm text-muted-foreground">
-                {t.onboarding.launchHint}
-              </p>
-              <Button asChild variant="outline" size="sm">
-                <Link href="/onboarding">
-                  {t.onboarding.bannerCta}
-                  <ArrowRight className="size-4" />
-                </Link>
-              </Button>
-            </CardContent>
-          </Card>
-        )}
 
         {/* Team */}
         {canManage ? (

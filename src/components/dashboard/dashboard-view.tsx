@@ -9,8 +9,6 @@ import {
   AlertTriangle,
   CheckCircle2,
   Sparkles,
-  Rocket,
-  ArrowRight,
   Radar,
   Send,
   ShieldAlert,
@@ -33,7 +31,6 @@ export function DashboardView({
   topApproval,
   boardTasks,
   canApprove,
-  showSetupBanner = false,
 }: {
   userName: string;
   metrics: {
@@ -45,7 +42,6 @@ export function DashboardView({
   topApproval: ApprovalDTO | null;
   boardTasks: TaskDTO[];
   canApprove: boolean;
-  showSetupBanner?: boolean;
 }) {
   const { t } = useI18n();
   const router = useRouter();
@@ -89,28 +85,6 @@ export function DashboardView({
           {t.dashboard.welcome}, {userName.split(" ")[0]}.
         </p>
       </div>
-
-      {showSetupBanner && (
-        <Card className="flex flex-col items-start justify-between gap-3 border-primary/30 bg-primary/[0.04] p-4 sm:flex-row sm:items-center">
-          <div className="flex items-start gap-3">
-            <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/15 text-primary">
-              <Rocket className="size-4.5" />
-            </span>
-            <div>
-              <p className="text-sm font-medium">{t.onboarding.bannerTitle}</p>
-              <p className="text-sm text-muted-foreground">
-                {t.onboarding.bannerText}
-              </p>
-            </div>
-          </div>
-          <Button asChild size="sm" className="shrink-0">
-            <Link href="/onboarding">
-              {t.onboarding.bannerCta}
-              <ArrowRight className="size-4" />
-            </Link>
-          </Button>
-        </Card>
-      )}
 
       {/* Metrics */}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">

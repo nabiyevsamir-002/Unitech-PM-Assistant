@@ -2,7 +2,17 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Send, Sparkles, AlertCircle, Target } from "lucide-react";
+import {
+  Send,
+  Sparkles,
+  AlertCircle,
+  Target,
+  Square,
+  Pencil,
+  Mic,
+  Volume2,
+  Trash2,
+} from "lucide-react";
 import { toast } from "sonner";
 import {
   Sheet,
@@ -17,6 +27,31 @@ import { useI18n } from "@/components/providers/i18n-provider";
 import { listProjectsForAi } from "@/app/actions/projects";
 
 type ChatMessage = { role: "user" | "assistant"; content: string };
+
+// Where the conversation is kept so a refresh / tab switch doesn't wipe it.
+const CHAT_KEY = "pm-ai-chat-v1";
+
+// Minimal typings for the Web Speech API (not part of the standard DOM lib).
+type SpeechResultLike = { 0: { transcript: string }; isFinal: boolean };
+interface SpeechRecognitionLike {
+  lang: string;
+  continuous: boolean;
+  interimResults: boolean;
+  start: () => void;
+  stop: () => void;
+  onresult: ((e: { results: ArrayLike<SpeechResultLike> }) => void) | null;
+  onerror: ((e: { error?: string }) => void) | null;
+  onend: (() => void) | null;
+  onstart: (() => void) | null;
+}
+function getSpeechRecognition(): (new () => SpeechRecognitionLike) | null {
+  if (typeof window === "undefined") return null;
+  const w = window as unknown as {
+    SpeechRecognition?: new () => SpeechRecognitionLike;
+    webkitSpeechRecognition?: new () => SpeechRecognitionLike;
+  };
+  return w.SpeechRecognition || w.webkitSpeechRecognition || null;
+}
 
 export function AiPanel({
   open,
@@ -33,7 +68,51 @@ export function AiPanel({
   const [aiOnline, setAiOnline] = useState<boolean | null>(null);
   const [projects, setProjects] = useState<{ id: string; name: string }[]>([]);
   const [focusId, setFocusId] = useState("");
+  const [listening, setListening] = useState(false);
+  const [speakingIdx, setSpeakingIdx] = useState<number | null>(null);
+  const [voiceIn, setVoiceIn] = useState(false);
+  const [voiceOut, setVoiceOut] = useState(false);
+
   const scrollRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  const dictationBaseRef = useRef("");
+  // Only write to storage after a real user action — never during hydration
+  // (otherwise the mount-time effect would clobber the saved chat with []).
+  const touchedRef = useRef(false);
+
+  // Detect voice support once (client only).
+  useEffect(() => {
+    setVoiceIn(!!getSpeechRecognition());
+    setVoiceOut(typeof window !== "undefined" && "speechSynthesis" in window);
+  }, []);
+
+  // Restore the last conversation on load (survives refresh / tab switch).
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(CHAT_KEY);
+      if (!raw) return;
+      const saved = JSON.parse(raw) as { messages?: ChatMessage[]; focusId?: string };
+      if (Array.isArray(saved.messages)) setMessages(saved.messages);
+      if (typeof saved.focusId === "string") setFocusId(saved.focusId);
+    } catch {
+      /* ignore corrupt / unavailable storage */
+    }
+  }, []);
+
+  // Persist the conversation whenever it settles (drop the mid-stream placeholder).
+  useEffect(() => {
+    if (busy || !touchedRef.current) return;
+    try {
+      const clean = messages.filter(
+        (m) => !(m.role === "assistant" && m.content === ""),
+      );
+      localStorage.setItem(CHAT_KEY, JSON.stringify({ messages: clean, focusId }));
+    } catch {
+      /* ignore quota / private-mode errors */
+    }
+  }, [messages, focusId, busy]);
 
   // Health check + load the project list for the focus picker when the panel opens.
   useEffect(() => {
@@ -47,6 +126,16 @@ export function AiPanel({
       .catch(() => setProjects([]));
   }, [open]);
 
+  // When the panel closes, stop any voice/streaming in progress.
+  useEffect(() => {
+    if (open) return;
+    abortRef.current?.abort();
+    recognitionRef.current?.stop();
+    if (typeof window !== "undefined") window.speechSynthesis?.cancel();
+    setSpeakingIdx(null);
+    setListening(false);
+  }, [open]);
+
   useEffect(() => {
     scrollRef.current?.scrollTo({
       top: scrollRef.current.scrollHeight,
@@ -57,16 +146,22 @@ export function AiPanel({
   const send = async () => {
     const text = input.trim();
     if (!text || busy) return;
+    touchedRef.current = true;
     setInput("");
     const next: ChatMessage[] = [...messages, { role: "user", content: text }];
     setMessages([...next, { role: "assistant", content: "" }]);
     setBusy(true);
+
+    const controller = new AbortController();
+    abortRef.current = controller;
+    let acc = "";
 
     try {
       const res = await fetch("/api/ai/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ messages: next, lang, projectId: focusId || undefined }),
+        signal: controller.signal,
       });
 
       if (!res.ok || !res.body) {
@@ -76,7 +171,6 @@ export function AiPanel({
       const created = res.headers.get("X-Approvals-Created");
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
-      let acc = "";
 
       for (;;) {
         const { done, value } = await reader.read();
@@ -93,19 +187,112 @@ export function AiPanel({
         toast.success(t.ai.proposedApproval);
         router.refresh();
       }
-    } catch {
+    } catch (err) {
+      const aborted = (err as Error)?.name === "AbortError";
       setMessages((prev) => {
         const copy = [...prev];
         copy[copy.length - 1] = {
           role: "assistant",
-          content: t.ai.disabled,
+          // On a manual stop keep whatever streamed so far; otherwise show the error.
+          content: aborted ? acc || t.ai.stopped : t.ai.disabled,
         };
         return copy;
       });
-      setAiOnline(false);
+      if (!aborted) setAiOnline(false);
     } finally {
       setBusy(false);
+      abortRef.current = null;
+      inputRef.current?.focus();
     }
+  };
+
+  const stop = () => abortRef.current?.abort();
+
+  const clearChat = () => {
+    if (typeof window !== "undefined") window.speechSynthesis?.cancel();
+    touchedRef.current = true;
+    setSpeakingIdx(null);
+    setMessages([]);
+    setInput("");
+    try {
+      localStorage.removeItem(CHAT_KEY);
+    } catch {
+      /* ignore */
+    }
+    inputRef.current?.focus();
+  };
+
+  // Put a previously-sent message back in the box and drop it + everything after,
+  // so the user can edit and re-send.
+  const editMessage = (index: number) => {
+    if (busy) return;
+    touchedRef.current = true;
+    setInput(messages[index].content);
+    setMessages(messages.slice(0, index));
+    inputRef.current?.focus();
+  };
+
+  const toggleDictation = () => {
+    if (listening) {
+      recognitionRef.current?.stop();
+      return;
+    }
+    const SR = getSpeechRecognition();
+    if (!SR) {
+      toast.error(t.ai.voiceUnsupported);
+      return;
+    }
+    const rec = new SR();
+    rec.lang = lang === "en" ? "en-US" : "az-AZ";
+    rec.interimResults = true;
+    rec.continuous = false;
+    dictationBaseRef.current = input.trim();
+    rec.onstart = () => setListening(true);
+    rec.onend = () => {
+      setListening(false);
+      recognitionRef.current = null;
+    };
+    rec.onerror = (e) => {
+      setListening(false);
+      if (e.error !== "aborted" && e.error !== "no-speech") {
+        toast.error(t.ai.voiceError);
+      }
+    };
+    rec.onresult = (e) => {
+      let heard = "";
+      for (let i = 0; i < e.results.length; i++) {
+        heard += e.results[i][0].transcript;
+      }
+      const base = dictationBaseRef.current;
+      setInput(base ? `${base} ${heard}` : heard);
+    };
+    recognitionRef.current = rec;
+    rec.start();
+  };
+
+  const speak = (index: number, text: string) => {
+    if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
+    const synth = window.speechSynthesis;
+    // Clicking the speaker on the message that is playing stops it.
+    if (speakingIdx === index) {
+      synth.cancel();
+      setSpeakingIdx(null);
+      return;
+    }
+    synth.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    const voices = synth.getVoices();
+    const byPrefix = (p: string) =>
+      voices.find((v) => v.lang?.toLowerCase().startsWith(p));
+    // Prefer Azerbaijani; Turkish is phonetically close as a fallback.
+    const picked =
+      lang === "en" ? byPrefix("en") : byPrefix("az") || byPrefix("tr");
+    if (picked) u.voice = picked;
+    u.lang = picked?.lang || (lang === "en" ? "en-US" : "az-AZ");
+    u.onend = () => setSpeakingIdx(null);
+    u.onerror = () => setSpeakingIdx(null);
+    setSpeakingIdx(index);
+    synth.speak(u);
   };
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -125,6 +312,11 @@ export function AiPanel({
       <SheetContent
         side="right"
         className="flex w-full flex-col gap-0 p-0 sm:max-w-md lg:max-w-lg"
+        // Focus the message box straight away instead of the close button.
+        onOpenAutoFocus={(e) => {
+          e.preventDefault();
+          setTimeout(() => inputRef.current?.focus(), 0);
+        }}
       >
         <SheetHeader className="border-b px-5 py-4">
           <SheetTitle className="flex items-center gap-2">
@@ -132,12 +324,25 @@ export function AiPanel({
               <Sparkles className="size-4.5" />
             </span>
             {t.ai.assistant}
-            {aiOnline === false && (
-              <span className="ml-auto flex items-center gap-1 text-xs font-normal text-destructive">
-                <AlertCircle className="size-3.5" />
-                {t.settings.aiOffline}
-              </span>
-            )}
+            <div className="ml-auto flex items-center gap-3 pr-7">
+              {aiOnline === false && (
+                <span className="flex items-center gap-1 text-xs font-normal text-destructive">
+                  <AlertCircle className="size-3.5" />
+                  {t.settings.aiOffline}
+                </span>
+              )}
+              {messages.length > 0 && (
+                <button
+                  type="button"
+                  onClick={clearChat}
+                  aria-label={t.ai.clearChat}
+                  title={t.ai.clearChat}
+                  className="text-muted-foreground transition-colors hover:text-destructive"
+                >
+                  <Trash2 className="size-4" />
+                </button>
+              )}
+            </div>
           </SheetTitle>
         </SheetHeader>
 
@@ -146,7 +351,10 @@ export function AiPanel({
             <Target className="size-4 shrink-0 text-muted-foreground" />
             <select
               value={focusId}
-              onChange={(e) => setFocusId(e.target.value)}
+              onChange={(e) => {
+                touchedRef.current = true;
+                setFocusId(e.target.value);
+              }}
               className="min-w-0 flex-1 truncate rounded-md border bg-background px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-ring"
             >
               <option value="">{t.ai.allProjects}</option>
@@ -176,8 +384,8 @@ export function AiPanel({
             <div
               key={i}
               className={cn(
-                "flex",
-                m.role === "user" ? "justify-end" : "justify-start",
+                "group flex flex-col gap-1",
+                m.role === "user" ? "items-end" : "items-start",
               )}
             >
               <div
@@ -193,6 +401,43 @@ export function AiPanel({
                     <ThinkingDots label={t.ai.thinking} />
                   ) : null)}
               </div>
+
+              {/* Edit your own message */}
+              {m.role === "user" && !busy && (
+                <button
+                  type="button"
+                  onClick={() => editMessage(i)}
+                  aria-label={t.ai.edit}
+                  title={t.ai.edit}
+                  className="flex items-center gap-1 px-1 text-xs text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus:opacity-100 group-hover:opacity-100"
+                >
+                  <Pencil className="size-3" />
+                  {t.ai.edit}
+                </button>
+              )}
+
+              {/* Read an AI answer aloud */}
+              {m.role === "assistant" && m.content && voiceOut && (
+                <button
+                  type="button"
+                  onClick={() => speak(i, m.content)}
+                  aria-label={speakingIdx === i ? t.ai.stopAudio : t.ai.listen}
+                  title={speakingIdx === i ? t.ai.stopAudio : t.ai.listen}
+                  className={cn(
+                    "flex items-center gap-1 px-1 text-xs transition-opacity hover:text-foreground focus:opacity-100 group-hover:opacity-100",
+                    speakingIdx === i
+                      ? "text-primary opacity-100"
+                      : "text-muted-foreground opacity-0",
+                  )}
+                >
+                  {speakingIdx === i ? (
+                    <Square className="size-3 fill-current" />
+                  ) : (
+                    <Volume2 className="size-3" />
+                  )}
+                  {speakingIdx === i ? t.ai.stopAudio : t.ai.listen}
+                </button>
+              )}
             </div>
           ))}
         </div>
@@ -200,23 +445,59 @@ export function AiPanel({
         <div className="border-t p-3">
           <div className="relative">
             <Textarea
+              ref={inputRef}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={onKeyDown}
               placeholder={t.ai.placeholder}
               rows={2}
-              className="resize-none pr-12"
-              disabled={busy}
+              className={cn("resize-none", voiceIn ? "pr-20" : "pr-12")}
             />
-            <Button
-              size="icon"
-              className="absolute right-2 bottom-2 size-8"
-              onClick={send}
-              disabled={busy || !input.trim()}
-              aria-label={t.ai.send}
-            >
-              <Send className="size-4" />
-            </Button>
+
+            {/* Dictate (voice → text) */}
+            {voiceIn && (
+              <Button
+                type="button"
+                size="icon"
+                variant={listening ? "default" : "ghost"}
+                className={cn(
+                  "absolute right-11 bottom-2 size-8",
+                  listening && "animate-pulse",
+                )}
+                onClick={toggleDictation}
+                disabled={busy}
+                aria-label={listening ? t.ai.dictateStop : t.ai.dictate}
+                title={listening ? t.ai.dictateStop : t.ai.dictate}
+              >
+                <Mic className="size-4" />
+              </Button>
+            )}
+
+            {/* Stop while streaming, otherwise send */}
+            {busy ? (
+              <Button
+                type="button"
+                size="icon"
+                variant="destructive"
+                className="absolute right-2 bottom-2 size-8"
+                onClick={stop}
+                aria-label={t.ai.stop}
+                title={t.ai.stop}
+              >
+                <Square className="size-4 fill-current" />
+              </Button>
+            ) : (
+              <Button
+                size="icon"
+                className="absolute right-2 bottom-2 size-8"
+                onClick={send}
+                disabled={!input.trim()}
+                aria-label={t.ai.send}
+                title={t.ai.send}
+              >
+                <Send className="size-4" />
+              </Button>
+            )}
           </div>
         </div>
       </SheetContent>
