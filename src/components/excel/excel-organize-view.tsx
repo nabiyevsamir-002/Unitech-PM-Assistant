@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   Upload,
@@ -14,6 +14,7 @@ import {
   ArrowRight,
   ChevronDown,
   ChevronRight,
+  Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -21,6 +22,11 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { useI18n } from "@/components/providers/i18n-provider";
 import { importExcelProject } from "@/app/actions/projects";
+import {
+  listExcelUploads,
+  deleteExcelUpload,
+  markExcelUploadSaved,
+} from "@/app/actions/excel-uploads";
 
 type Stats = { total: number; done: number; overdue: number; dueToday: number };
 type ImportTask = {
@@ -54,6 +60,7 @@ function distinctSheets(tasks: ImportTask[]): string[] {
 type Result = {
   ok: boolean;
   empty?: boolean;
+  uploadId?: string | null;
   headers: string[];
   rows: string[][];
   tsv: string;
@@ -65,9 +72,10 @@ type Result = {
 
 type JobStatus = "queued" | "analyzing" | "done" | "error";
 type Job = {
-  id: string;
+  id: string; // client-side id
+  uploadId: string | null; // DB ExcelUpload id (null until persisted)
   fileName: string;
-  file: File;
+  file: File | null; // present for freshly-added files; null for restored ones
   status: JobStatus;
   result: Result | null;
   error: string | null;
@@ -75,16 +83,25 @@ type Job = {
   sheetNames: Record<string, string>; // sheet name → project name (multi-sheet grouping)
   importing: boolean;
   importedId: string | null;
+  deleting: boolean;
   open: boolean;
 };
+
+function defaultSheetNames(tasks: ImportTask[]): Record<string, string> {
+  const map: Record<string, string> = {};
+  for (const s of distinctSheets(tasks)) map[s] = s;
+  return map;
+}
 
 export function ExcelOrganizeView() {
   const { t } = useI18n();
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
   const [jobs, setJobs] = useState<Job[]>([]);
+  const [restoring, setRestoring] = useState(true);
   const jobsRef = useRef<Job[]>([]);
   const pumping = useRef(false);
+  const loadedRef = useRef(false);
 
   // The ref is the source of truth for the sequential pump; update it
   // SYNCHRONOUSLY (React's setState updater runs async, so a ref written inside
@@ -97,6 +114,43 @@ export function ExcelOrganizeView() {
   const patchJob = (id: string, patch: Partial<Job>) =>
     setJobsSynced((prev) => prev.map((j) => (j.id === id ? { ...j, ...patch } : j)));
 
+  // Rebuild the cards from the DB on load, so analyzed batches survive a
+  // refresh / navigation until the user deletes them.
+  useEffect(() => {
+    if (loadedRef.current) return;
+    loadedRef.current = true;
+    listExcelUploads()
+      .then((rows) => {
+        const restored: Job[] = rows.map((row) => {
+          let result: Result | null = null;
+          try {
+            result = JSON.parse(row.snapshot) as Result;
+          } catch {
+            result = null;
+          }
+          const tasks = result?.tasks ?? [];
+          return {
+            id: crypto.randomUUID(),
+            uploadId: row.id,
+            fileName: row.fileName,
+            file: null,
+            status: "done",
+            result,
+            error: null,
+            projectName: row.fileName.replace(/\.xlsx$/i, "").trim(),
+            sheetNames: defaultSheetNames(tasks),
+            importing: false,
+            importedId: row.savedProjectId,
+            deleting: false,
+            open: false,
+          };
+        });
+        if (restored.length) setJobsSynced(() => restored);
+      })
+      .catch(() => {})
+      .finally(() => setRestoring(false));
+  }, []);
+
   // Process queued jobs strictly one at a time (the model handles one file at a
   // time; results appear as each finishes).
   const pump = async () => {
@@ -105,7 +159,7 @@ export function ExcelOrganizeView() {
     try {
       for (;;) {
         const next = jobsRef.current.find((j) => j.status === "queued");
-        if (!next) break;
+        if (!next || !next.file) break;
         patchJob(next.id, { status: "analyzing" });
         try {
           const fd = new FormData();
@@ -115,12 +169,12 @@ export function ExcelOrganizeView() {
           if (!res.ok || !data.ok) {
             patchJob(next.id, { status: "error", error: data.error ?? t.excel.error });
           } else {
-            // Default each sheet's project name to the sheet's own name — the user
-            // can rename or give two sheets the SAME name to merge them.
-            const sheets = distinctSheets(data.tasks);
-            const sheetNames: Record<string, string> = {};
-            for (const s of sheets) sheetNames[s] = s;
-            patchJob(next.id, { status: "done", result: data, sheetNames });
+            patchJob(next.id, {
+              status: "done",
+              result: data,
+              uploadId: data.uploadId ?? null,
+              sheetNames: defaultSheetNames(data.tasks),
+            });
           }
         } catch {
           patchJob(next.id, { status: "error", error: t.excel.error });
@@ -139,6 +193,7 @@ export function ExcelOrganizeView() {
     }
     const newJobs: Job[] = xlsx.map((f) => ({
       id: crypto.randomUUID(),
+      uploadId: null,
       fileName: f.name,
       file: f,
       status: "queued",
@@ -148,6 +203,7 @@ export function ExcelOrganizeView() {
       sheetNames: {},
       importing: false,
       importedId: null,
+      deleting: false,
       open: xlsx.length === 1, // auto-expand when a single file is uploaded
     }));
     setJobsSynced((prev) => [...prev, ...newJobs]);
@@ -180,15 +236,25 @@ export function ExcelOrganizeView() {
         }
         let okAll = true;
         let lastErr = "";
+        let firstProjectId: string | null = null;
         for (const [name, groupTasks] of groups) {
           const res = await importExcelProject(name, groupTasks);
           if (!res.ok) {
             okAll = false;
             lastErr = res.message;
+          } else if (!firstProjectId && res.projectId) {
+            firstProjectId = res.projectId;
           }
         }
         if (okAll) {
-          patchJob(id, { importedId: "saved", importing: false });
+          if (job.uploadId) {
+            try {
+              await markExcelUploadSaved(job.uploadId, firstProjectId ?? "saved");
+            } catch {
+              /* best-effort */
+            }
+          }
+          patchJob(id, { importedId: firstProjectId ?? "saved", importing: false });
           toast.success(`${groups.size} ${t.excel.savedSuffix}.`);
           router.refresh();
         } else {
@@ -203,6 +269,13 @@ export function ExcelOrganizeView() {
         }
         const res = await importExcelProject(name, tasks);
         if (res.ok) {
+          if (job.uploadId && res.projectId) {
+            try {
+              await markExcelUploadSaved(job.uploadId, res.projectId);
+            } catch {
+              /* best-effort */
+            }
+          }
           patchJob(id, { importedId: res.projectId ?? "saved", importing: false });
           toast.success(res.message);
           router.refresh();
@@ -223,6 +296,22 @@ export function ExcelOrganizeView() {
         await saveJob(j.id);
       }
     }
+  };
+
+  // Remove a card: delete the stored upload (if any) and drop it from the list.
+  const deleteJob = async (id: string) => {
+    const job = jobsRef.current.find((j) => j.id === id);
+    if (!job || job.deleting) return;
+    patchJob(id, { deleting: true });
+    if (job.uploadId) {
+      try {
+        await deleteExcelUpload(job.uploadId);
+      } catch {
+        /* best-effort — still drop it locally */
+      }
+    }
+    setJobsSynced((prev) => prev.filter((j) => j.id !== id));
+    toast.success(t.excel.deleted);
   };
 
   const copy = async (text: string) => {
@@ -309,6 +398,12 @@ export function ExcelOrganizeView() {
         </div>
       )}
 
+      {restoring && jobs.length === 0 && (
+        <p className="flex items-center gap-2 px-1 text-sm text-muted-foreground">
+          <Loader2 className="size-4 animate-spin" /> …
+        </p>
+      )}
+
       {/* One card per file */}
       {jobs.map((job) => (
         <JobCard
@@ -321,6 +416,7 @@ export function ExcelOrganizeView() {
           }
           onToggle={() => patchJob(job.id, { open: !job.open })}
           onSave={() => saveJob(job.id)}
+          onDelete={() => deleteJob(job.id)}
           onCopy={copy}
           onViewProjects={() => router.push("/projects")}
         />
@@ -336,6 +432,7 @@ function JobCard({
   onSheetName,
   onToggle,
   onSave,
+  onDelete,
   onCopy,
   onViewProjects,
 }: {
@@ -345,6 +442,7 @@ function JobCard({
   onSheetName: (sheet: string, v: string) => void;
   onToggle: () => void;
   onSave: () => void;
+  onDelete: () => void;
   onCopy: (text: string) => void;
   onViewProjects: () => void;
 }) {
@@ -356,6 +454,7 @@ function JobCard({
   const canSave = multiSheet
     ? sheets.every((s) => (job.sheetNames[s] ?? "").trim() !== "")
     : job.projectName.trim() !== "";
+  const canDelete = job.status === "done" || job.status === "error";
 
   return (
     <Card>
@@ -364,7 +463,25 @@ function JobCard({
           <FileSpreadsheet className="size-4 shrink-0 text-primary" />
           <span className="truncate">{job.fileName}</span>
         </CardTitle>
-        <StatusBadge job={job} t={t} />
+        <div className="flex shrink-0 items-center gap-2">
+          <StatusBadge job={job} t={t} />
+          {canDelete && (
+            <button
+              type="button"
+              onClick={onDelete}
+              disabled={job.deleting}
+              aria-label={t.excel.delete}
+              title={t.excel.delete}
+              className="text-muted-foreground transition-colors hover:text-destructive disabled:opacity-50"
+            >
+              {job.deleting ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <Trash2 className="size-4" />
+              )}
+            </button>
+          )}
+        </div>
       </CardHeader>
 
       <CardContent className="space-y-3">

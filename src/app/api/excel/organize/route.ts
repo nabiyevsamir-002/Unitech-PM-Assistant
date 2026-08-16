@@ -4,6 +4,7 @@ import { parseWorkbook } from "@/lib/excel/read";
 import { analyzeTasks } from "@/lib/excel/analyze";
 import { excelInsights } from "@/lib/ollama/agents";
 import { formatDate } from "@/lib/format";
+import { prisma } from "@/lib/prisma";
 import type { ParsedTask } from "@/lib/excel/types";
 
 export const runtime = "nodejs";
@@ -85,6 +86,25 @@ export async function POST(req: Request) {
 
   const insights = await excelInsights(grounding);
 
-  // `tasks` (structured) lets the client offer "import as project" without re-upload.
-  return Response.json({ ok: true, empty: false, headers: HEADERS, rows, tsv, insights, stats, tasks });
+  // Persist the analyzed snapshot so batches survive a refresh / navigation and
+  // stay listed until the user deletes them. `tasks` (structured) also lets the
+  // client offer "import as project" without re-uploading. Best-effort: still
+  // return the analysis even if the write fails.
+  const snapshotPayload = { headers: HEADERS, rows, tsv, insights, stats, tasks };
+  let uploadId: string | null = null;
+  try {
+    const upload = await prisma.excelUpload.create({
+      data: {
+        fileName: file.name,
+        uploadedById: session.user.id ?? null,
+        snapshot: JSON.stringify(snapshotPayload),
+      },
+      select: { id: true },
+    });
+    uploadId = upload.id;
+  } catch {
+    /* best-effort persistence */
+  }
+
+  return Response.json({ ok: true, empty: false, uploadId, ...snapshotPayload });
 }

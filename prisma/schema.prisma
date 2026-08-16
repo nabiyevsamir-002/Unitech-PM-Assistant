@@ -43,6 +43,7 @@ model User {
   assignedTasks   Task[]      @relation("TaskAssignee")
   decidedApprovals Approval[] @relation("ApprovalDecider")
   timeLogs        TimeLog[]
+  excelUploads    ExcelUpload[] @relation("UserExcelUploads")
 
   @@index([role])
 }
@@ -147,6 +148,24 @@ model ExcelSource {
   createdAt    DateTime @default(now())
 
   project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+}
+
+// A user-uploaded Excel file that has been parsed + AI-analyzed. The whole
+// organize result (headers/rows/tsv/insights/stats/tasks) is stored as a JSON
+// snapshot so batches of analyzed files survive a refresh / navigation and stay
+// listed until the user deletes them. `savedProjectId` is set once the upload is
+// imported into a managed Project.
+model ExcelUpload {
+  id             String   @id @default(cuid())
+  fileName       String
+  uploadedById   String?
+  snapshot       String   // JSON: { headers, rows, tsv, insights, stats, tasks }
+  savedProjectId String?
+  createdAt      DateTime @default(now())
+
+  uploadedBy User? @relation("UserExcelUploads", fields: [uploadedById], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
 }
 
 model TimeLog {
