@@ -74,9 +74,11 @@ export async function collectRisks(): Promise<RiskReport> {
       const x = parseExtras(t.customFields);
       return {
         index: 0,
+        sheet: "",
         id: x.sourceId ?? "",
         subId: "",
         title: t.title,
+        costCenter: "",
         assignee: t.assignee?.name ?? "",
         assignee2: "",
         dependsOn: x.dependsOn ?? "",

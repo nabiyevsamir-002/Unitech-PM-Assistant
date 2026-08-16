@@ -106,7 +106,7 @@ export async function readWorkbook(absPath: string): Promise<ExcelModel> {
 export function parseWorkbook(wb: ExcelJS.Workbook): ExcelModel {
   const sheets: ExcelSheet[] = [];
   const meta: Record<string, ExcelCellValue> = {};
-  let tasks: ParsedTask[] = [];
+  const tasks: ParsedTask[] = [];
 
   wb.eachSheet((ws) => {
     const rows: ExcelCellValue[][] = [];
@@ -127,14 +127,16 @@ export function parseWorkbook(wb: ExcelJS.Workbook): ExcelModel {
       }
     }
 
-    // Tasks: locate a header row, then read until a blank title.
-    if (tasks.length === 0) {
-      const headerIdx = rows.findIndex((r) => r.some(isTitleHeaderCell));
-      if (headerIdx !== -1) {
-        tasks = parseTasks(rows, headerIdx);
-      }
+    // Tasks: locate a header row, then read until a blank title. Every sheet is
+    // scanned (a multi-sheet workbook often holds several projects), and each
+    // task is tagged with its sheet name so the importer can split by project.
+    const headerIdx = rows.findIndex((r) => r.some(isTitleHeaderCell));
+    if (headerIdx !== -1) {
+      for (const t of parseTasks(rows, headerIdx, ws.name)) tasks.push(t);
     }
   });
+
+  tasks.forEach((t, i) => (t.index = i + 1)); // continuous numbering across sheets
 
   return { sheets, meta, tasks };
 }
@@ -150,7 +152,11 @@ const isEndWord = (h: string) =>
 const isBudgetWord = (h: string) =>
   h.includes("büdcə") || h.includes("budce") || h.includes("budget");
 
-function parseTasks(rows: ExcelCellValue[][], headerIdx: number): ParsedTask[] {
+function parseTasks(
+  rows: ExcelCellValue[][],
+  headerIdx: number,
+  sheetName: string,
+): ParsedTask[] {
   const header = rows[headerIdx].map((c) => lc(c));
   const col = (names: string[]) =>
     header.findIndex((h) => names.some((n) => h.includes(n)));
@@ -263,6 +269,9 @@ function parseTasks(rows: ExcelCellValue[][], headerIdx: number): ParsedTask[] {
     rate: rateCol,
     budget: budgetCol,
     initBudget: budInitCol,
+    costCenter: header.findIndex(
+      (h) => h.includes("xərc") || h.includes("xerc") || h.includes("mərkəz") || h.includes("merkez") || h.includes("cost center") || h.includes("cost centre"),
+    ),
     note: col(["qeyd", "note", "şərh"]),
   };
   const num = (v: ExcelCellValue): number | null =>
@@ -299,9 +308,11 @@ function parseTasks(rows: ExcelCellValue[][], headerIdx: number): ParsedTask[] {
     const initBudget = ci.initBudget >= 0 ? num(r[ci.initBudget]) : null;
     out.push({
       index: out.length + 1,
+      sheet: sheetName,
       id: str(ci.id, r),
       subId: str(ci.subId, r),
       title: String(title).trim(),
+      costCenter: str(ci.costCenter, r),
       assignee: str(ci.assignee, r),
       assignee2: str(ci.assignee2, r),
       dependsOn: str(ci.dependsOn, r),

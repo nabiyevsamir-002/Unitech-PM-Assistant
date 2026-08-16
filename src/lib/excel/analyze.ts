@@ -84,6 +84,15 @@ export function analyzeTasks(tasks: ParsedTask[]): ExcelAnalysis {
   const estTotal = tasks.reduce((s, t) => s + (t.hours ?? 0), 0);
   const actTotal = tasks.reduce((s, t) => s + (t.actualHours ?? 0), 0);
 
+  // Budget grouped by cost center ("Xərc Mərkəzi", e.g. İnfrastruktur) — computed
+  // here so questions like "total infrastructure cost" never rely on the model
+  // adding numbers itself.
+  const byCenter = new Map<string, number>();
+  for (const t of tasks) {
+    const c = (t.costCenter ?? "").trim();
+    if (c && t.budget != null) byCenter.set(c, (byCenter.get(c) ?? 0) + t.budget);
+  }
+
   // Combined workload: a person's estimated hours + task count across BOTH the
   // primary ("Məsul") and secondary ("İkinci İcraçı") columns.
   type Load = { hours: number; primary: number; secondary: number };
@@ -130,6 +139,12 @@ export function analyzeTasks(tasks: ParsedTask[]): ExcelAnalysis {
   }
   if (estTotal > 0 || actTotal > 0)
     lines.push(`Saatlar (vaxt, pul deyil): təxmini cəmi ${estTotal}, faktiki cəmi ${actTotal}.`);
+
+  if (byCenter.size > 0) {
+    lines.push("\nBÜDCƏ XƏRC MƏRKƏZİ ÜZRƏ (AZN, kodda hesablanıb — yenidən toplama):");
+    for (const [c, v] of [...byCenter.entries()].sort((a, b) => b[1] - a[1]))
+      lines.push(`- ${c}: ${v}`);
+  }
 
   lines.push("\nKOMANDA YÜKÜ (əsas + ikinci icraçı BİRLƏŞDİRİLMİŞ, təxmini saat üzrə, çoxdan aza):");
   for (const [name, l] of ranked) {

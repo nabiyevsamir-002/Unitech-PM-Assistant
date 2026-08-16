@@ -69,6 +69,8 @@ export const az = {
     analyzedOf: "fayl analiz olundu",
     saveAll: "Hamısını layihə kimi saxla",
     savedSuffix: "layihə saxlanıldı",
+    sheetsWord: "vərəq",
+    multiSheetHint: "hər vərəqə layihə adı ver (eyni ad → həmin vərəqlər bir layihədə birləşir).",
     details: "Detallar",
     hideDetails: "Gizlət",
     tableTitle: "Nizamlanmış cədvəl",

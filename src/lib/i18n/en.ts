@@ -69,6 +69,8 @@ export const en: Dictionary = {
     analyzedOf: "files analysed",
     saveAll: "Save all as projects",
     savedSuffix: "projects saved",
+    sheetsWord: "sheets",
+    multiSheetHint: "give each sheet a project name (same name → those sheets merge into one project).",
     details: "Details",
     hideDetails: "Hide",
     tableTitle: "Organized table",

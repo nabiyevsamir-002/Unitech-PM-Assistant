@@ -221,8 +221,10 @@ function toDate(v: string | null | undefined): Date | null {
 
 const importTaskSchema = z.object({
   title: z.string(),
+  sheet: z.string().optional().default(""),
   id: z.string().optional().default(""),
   subId: z.string().optional().default(""),
+  costCenter: z.string().optional().default(""),
   assignee: z.string().optional().default(""),
   assignee2: z.string().optional().default(""),
   dependsOn: z.string().optional().default(""),
@@ -312,6 +314,7 @@ export async function importExcelProject(
         // hours, both budgets, hourly rate, dependency + all four dates.
         customFields: JSON.stringify({
           sourceId: r.id || null,
+          costCenter: r.costCenter || null,
           assigneeName: rawAssignee || null,
           assignee2Name: rawAssignee2 || null,
           dependsOn: r.dependsOn || null,

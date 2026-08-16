@@ -9,7 +9,7 @@ import type { ParsedTask } from "@/lib/excel/types";
 export const runtime = "nodejs";
 export const maxDuration = 120;
 
-const HEADERS = ["№", "Tapşırıq", "Məsul", "İkinci icraçı", "Status", "Prioritet", "Başlama", "Bitmə", "Təxmini saat", "Faktiki saat", "Büdcə (AZN)", "Asılılıq", "Qeyd"];
+const HEADERS = ["№", "Tapşırıq", "Məsul", "İkinci icraçı", "Status", "Prioritet", "Başlama", "Bitmə", "Təxmini saat", "Faktiki saat", "Büdcə (AZN)", "Xərc mərkəzi", "Asılılıq", "Qeyd"];
 
 function toRow(t: ParsedTask): string[] {
   return [
@@ -24,6 +24,7 @@ function toRow(t: ParsedTask): string[] {
     t.hours != null ? String(t.hours) : "",
     t.actualHours != null ? String(t.actualHours) : "",
     t.budget != null ? String(t.budget) : "",
+    t.costCenter,
     t.dependsOn,
     t.note,
   ];

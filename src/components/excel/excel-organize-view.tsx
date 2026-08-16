@@ -25,6 +25,7 @@ import { importExcelProject } from "@/app/actions/projects";
 type Stats = { total: number; done: number; overdue: number; dueToday: number };
 type ImportTask = {
   title: string;
+  sheet: string;
   assignee: string;
   status: string;
   priority: string;
@@ -35,6 +36,21 @@ type ImportTask = {
   budget: number | null;
   note: string;
 };
+
+// Distinct source sheets, in first-seen order (a workbook may hold several
+// projects, one per sheet).
+function distinctSheets(tasks: ImportTask[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const t of tasks) {
+    const s = t.sheet || "";
+    if (!seen.has(s)) {
+      seen.add(s);
+      out.push(s);
+    }
+  }
+  return out;
+}
 type Result = {
   ok: boolean;
   empty?: boolean;
@@ -56,6 +72,7 @@ type Job = {
   result: Result | null;
   error: string | null;
   projectName: string;
+  sheetNames: Record<string, string>; // sheet name → project name (multi-sheet grouping)
   importing: boolean;
   importedId: string | null;
   open: boolean;
@@ -98,7 +115,12 @@ export function ExcelOrganizeView() {
           if (!res.ok || !data.ok) {
             patchJob(next.id, { status: "error", error: data.error ?? t.excel.error });
           } else {
-            patchJob(next.id, { status: "done", result: data });
+            // Default each sheet's project name to the sheet's own name — the user
+            // can rename or give two sheets the SAME name to merge them.
+            const sheets = distinctSheets(data.tasks);
+            const sheetNames: Record<string, string> = {};
+            for (const s of sheets) sheetNames[s] = s;
+            patchJob(next.id, { status: "done", result: data, sheetNames });
           }
         } catch {
           patchJob(next.id, { status: "error", error: t.excel.error });
@@ -123,6 +145,7 @@ export function ExcelOrganizeView() {
       result: null,
       error: null,
       projectName: f.name.replace(/\.xlsx$/i, "").trim(),
+      sheetNames: {},
       importing: false,
       importedId: null,
       open: xlsx.length === 1, // auto-expand when a single file is uploaded
@@ -131,19 +154,62 @@ export function ExcelOrganizeView() {
     void pump();
   };
 
-  const doImport = async (id: string) => {
+  // Import a file's tasks. Single sheet → one project (job.projectName). Multiple
+  // sheets → one project PER distinct assigned name (sheets sharing a name merge).
+  const saveJob = async (id: string) => {
     const job = jobsRef.current.find((j) => j.id === id);
-    if (!job || !job.result || !job.projectName.trim() || job.importing || job.importedId) return;
+    if (!job || !job.result || job.result.empty || job.importing || job.importedId) return;
+    const tasks = job.result.tasks;
+    const sheets = distinctSheets(tasks);
+
     patchJob(id, { importing: true });
     try {
-      const res = await importExcelProject(job.projectName.trim(), job.result.tasks);
-      if (res.ok) {
-        patchJob(id, { importedId: res.projectId ?? "saved", importing: false });
-        toast.success(res.message);
-        router.refresh();
+      if (sheets.length > 1) {
+        const groups = new Map<string, ImportTask[]>();
+        for (const tk of tasks) {
+          const name = (job.sheetNames[tk.sheet || ""] ?? "").trim();
+          if (!name) continue;
+          const arr = groups.get(name) ?? [];
+          arr.push(tk);
+          groups.set(name, arr);
+        }
+        if (groups.size === 0) {
+          patchJob(id, { importing: false });
+          toast.error(t.excel.error);
+          return;
+        }
+        let okAll = true;
+        let lastErr = "";
+        for (const [name, groupTasks] of groups) {
+          const res = await importExcelProject(name, groupTasks);
+          if (!res.ok) {
+            okAll = false;
+            lastErr = res.message;
+          }
+        }
+        if (okAll) {
+          patchJob(id, { importedId: "saved", importing: false });
+          toast.success(`${groups.size} ${t.excel.savedSuffix}.`);
+          router.refresh();
+        } else {
+          patchJob(id, { importing: false });
+          toast.error(lastErr || t.excel.error);
+        }
       } else {
-        patchJob(id, { importing: false });
-        toast.error(res.message);
+        const name = (job.projectName || sheets[0] || "").trim();
+        if (!name) {
+          patchJob(id, { importing: false });
+          return;
+        }
+        const res = await importExcelProject(name, tasks);
+        if (res.ok) {
+          patchJob(id, { importedId: res.projectId ?? "saved", importing: false });
+          toast.success(res.message);
+          router.refresh();
+        } else {
+          patchJob(id, { importing: false });
+          toast.error(res.message);
+        }
       }
     } catch {
       patchJob(id, { importing: false });
@@ -153,8 +219,8 @@ export function ExcelOrganizeView() {
 
   const saveAll = async () => {
     for (const j of jobsRef.current) {
-      if (j.status === "done" && !j.importedId && j.result && !j.result.empty && j.projectName.trim()) {
-        await doImport(j.id);
+      if (j.status === "done" && !j.importedId && j.result && !j.result.empty) {
+        await saveJob(j.id);
       }
     }
   };
@@ -250,8 +316,11 @@ export function ExcelOrganizeView() {
           job={job}
           t={t}
           onName={(v) => patchJob(job.id, { projectName: v })}
+          onSheetName={(sheet, v) =>
+            patchJob(job.id, { sheetNames: { ...job.sheetNames, [sheet]: v } })
+          }
           onToggle={() => patchJob(job.id, { open: !job.open })}
-          onSave={() => doImport(job.id)}
+          onSave={() => saveJob(job.id)}
           onCopy={copy}
           onViewProjects={() => router.push("/projects")}
         />
@@ -264,6 +333,7 @@ function JobCard({
   job,
   t,
   onName,
+  onSheetName,
   onToggle,
   onSave,
   onCopy,
@@ -272,6 +342,7 @@ function JobCard({
   job: Job;
   t: ReturnType<typeof useI18n>["t"];
   onName: (v: string) => void;
+  onSheetName: (sheet: string, v: string) => void;
   onToggle: () => void;
   onSave: () => void;
   onCopy: (text: string) => void;
@@ -279,6 +350,12 @@ function JobCard({
 }) {
   const r = job.result;
   const empty = job.status === "done" && (r?.empty || !r);
+  const sheets = r && !r.empty ? distinctSheets(r.tasks) : [];
+  const multiSheet = sheets.length > 1;
+  const sheetCount = (s: string) => (r ? r.tasks.filter((tk) => tk.sheet === s).length : 0);
+  const canSave = multiSheet
+    ? sheets.every((s) => (job.sheetNames[s] ?? "").trim() !== "")
+    : job.projectName.trim() !== "";
 
   return (
     <Card>
@@ -325,12 +402,35 @@ function JobCard({
                   <ArrowRight className="size-3.5" />
                 </Button>
               </div>
+            ) : multiSheet ? (
+              <div className="space-y-2 rounded-lg border bg-muted/20 p-3">
+                <p className="text-xs text-muted-foreground">
+                  {sheets.length} {t.excel.sheetsWord} · {t.excel.multiSheetHint}
+                </p>
+                {sheets.map((s) => (
+                  <div key={s} className="flex flex-col gap-1.5 sm:flex-row sm:items-center">
+                    <span className="w-40 shrink-0 truncate text-sm text-muted-foreground" title={s}>
+                      {s} <span className="opacity-60">({sheetCount(s)})</span>
+                    </span>
+                    <Input
+                      value={job.sheetNames[s] ?? ""}
+                      onChange={(e) => onSheetName(s, e.target.value)}
+                      placeholder="Layihə adı"
+                      className="flex-1"
+                    />
+                  </div>
+                ))}
+                <Button className="mt-1" onClick={onSave} disabled={job.importing || !canSave}>
+                  {job.importing ? <Loader2 className="size-4 animate-spin" /> : <FolderPlus className="size-4" />}
+                  {t.excel.importButton}
+                </Button>
+              </div>
             ) : (
               <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
                 <div className="flex-1">
                   <Input value={job.projectName} onChange={(e) => onName(e.target.value)} placeholder="Layihə adı" />
                 </div>
-                <Button onClick={onSave} disabled={job.importing || !job.projectName.trim()}>
+                <Button onClick={onSave} disabled={job.importing || !canSave}>
                   {job.importing ? <Loader2 className="size-4 animate-spin" /> : <FolderPlus className="size-4" />}
                   {t.excel.importButton}
                 </Button>

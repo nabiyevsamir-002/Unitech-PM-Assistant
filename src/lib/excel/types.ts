@@ -10,9 +10,11 @@ export type ExcelSheet = { name: string; rows: ExcelCellValue[][] };
 
 export type ParsedTask = {
   index: number;
+  sheet: string; // source worksheet name (a multi-sheet workbook = several projects)
   id: string; // source "ID" (e.g. "P1-01", "T-001"); "" if none
   subId: string; // source "Alt-ID"; "" if none (used to spot group-header rows)
   title: string;
+  costCenter: string; // "Xərc Mərkəzi" — e.g. İnfrastruktur / Dev / Design; "" if none
   assignee: string; // primary responsible person
   assignee2: string; // secondary assignee ("İkinci İcraçı"); "" if none
   dependsOn: string; // raw dependency id(s) ("Asılılıq (ID)"); "" if none

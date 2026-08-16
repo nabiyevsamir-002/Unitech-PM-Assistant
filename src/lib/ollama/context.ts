@@ -23,6 +23,7 @@ function iso(d: Date | null): string {
 // assignee, dependency + all four dates. Parse them defensively.
 type TaskExtras = {
   sourceId?: string | null;
+  costCenter?: string | null;
   assigneeName?: string | null;
   assignee2Name?: string | null;
   dependsOn?: string | null;
@@ -162,9 +163,11 @@ export async function buildAiContext(focusProjectId?: string): Promise<AiContext
       const x = extrasOf(t);
       return {
         index: 0,
+        sheet: "",
         id: x.sourceId ?? "",
         subId: "",
         title: t.title,
+        costCenter: x.costCenter ?? "",
         assignee: assigneeOf(t),
         assignee2: x.assignee2Name ?? "",
         dependsOn: x.dependsOn ?? "",
@@ -189,6 +192,20 @@ export async function buildAiContext(focusProjectId?: string): Promise<AiContext
   lines.push("\nDATE / DEPENDENCY ANOMALIES (early/late start, dependency violations):");
   if (anomalyLines.length === 0) lines.push("- none detected");
   else lines.push(...anomalyLines);
+
+  // Budget grouped by cost center ("Xərc Mərkəzi") — pre-computed so totals like
+  // "total infrastructure cost" never depend on the model adding numbers.
+  const byCenter = new Map<string, number>();
+  for (const t of tasks) {
+    const x = extrasOf(t);
+    const c = (x.costCenter ?? "").trim();
+    if (c && x.budget != null) byCenter.set(c, (byCenter.get(c) ?? 0) + x.budget);
+  }
+  if (byCenter.size > 0) {
+    lines.push("\nBUDGET BY COST CENTER (AZN, already summed — do not re-add):");
+    for (const [c, v] of [...byCenter.entries()].sort((a, b) => b[1] - a[1]))
+      lines.push(`- ${c}: ${v}`);
+  }
 
   lines.push("\nTEAM WORKLOAD (assigned open-task hours vs weekly capacity):");
   for (const u of users) {
