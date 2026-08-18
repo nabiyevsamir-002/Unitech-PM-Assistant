@@ -10,6 +10,7 @@ import { detectAnomalies } from "@/lib/excel/analyze";
 import type { ParsedTask } from "@/lib/excel/types";
 import { sendEmail, isEmailConfigured } from "@/lib/notify/email";
 import { sendTelegramMessage, isTelegramConfigured } from "@/lib/notify/telegram";
+import { createNotification } from "@/lib/notifications";
 
 type Extras = {
   sourceId?: string | null;
@@ -206,6 +207,17 @@ export async function sendRiskAlert(opts: { force?: boolean } = {}): Promise<Ris
   const report = await collectRisks();
   if (!report.hasRisks && !opts.force) {
     return { ok: true, delivered: false, channels: [], count: 0, reason: "no_risks" };
+  }
+
+  // Always drop an in-app notification when there are risks — independent of
+  // whether Telegram/email are configured or deliver.
+  if (report.hasRisks) {
+    await createNotification({
+      type: "RISK",
+      title: `${report.count} risk aşkarlandı`,
+      body: renderRiskText(report).slice(0, 280),
+      link: "/dashboard",
+    }).catch(() => {});
   }
 
   const emailOn = isEmailConfigured();

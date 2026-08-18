@@ -17,17 +17,22 @@ import { Notifications, type NotificationItem } from "./notifications";
 import { UserMenu } from "./user-menu";
 import { SidebarBrand, SidebarNav } from "./sidebar";
 import { useI18n } from "@/components/providers/i18n-provider";
+import type { NotificationFeedItem } from "@/lib/notifications";
 import type { DigestDTO } from "@/lib/types";
 
 export function Topbar({
   pendingCount,
   notifications,
+  feed,
+  unread,
   digest,
   user,
   onToggleAI,
 }: {
   pendingCount: number;
   notifications: NotificationItem[];
+  feed: NotificationFeedItem[];
+  unread: number;
   digest: DigestDTO;
   user: { name: string; email: string; role: string; image?: string | null };
   onToggleAI: () => void;
@@ -93,6 +98,8 @@ export function Topbar({
         <Notifications
           count={pendingCount}
           items={notifications}
+          feed={feed}
+          unread={unread}
           digest={digest}
         />
         <UserMenu

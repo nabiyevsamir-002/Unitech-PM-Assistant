@@ -5,17 +5,22 @@ import { DesktopSidebar } from "./sidebar";
 import { Topbar } from "./topbar";
 import { AiPanel } from "@/components/ai/ai-panel";
 import type { NotificationItem } from "./notifications";
+import type { NotificationFeedItem } from "@/lib/notifications";
 import type { DigestDTO } from "@/lib/types";
 
 export function AppShell({
   pendingCount,
   notifications,
+  feed,
+  unread,
   digest,
   user,
   children,
 }: {
   pendingCount: number;
   notifications: NotificationItem[];
+  feed: NotificationFeedItem[];
+  unread: number;
   digest: DigestDTO;
   user: { name: string; email: string; role: string; image?: string | null };
   children: React.ReactNode;
@@ -29,6 +34,8 @@ export function AppShell({
         <Topbar
           pendingCount={pendingCount}
           notifications={notifications}
+          feed={feed}
+          unread={unread}
           digest={digest}
           user={user}
           onToggleAI={() => setAiOpen((v) => !v)}

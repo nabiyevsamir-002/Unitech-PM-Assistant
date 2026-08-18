@@ -1,7 +1,9 @@
 "use client";
 
+import { useTransition } from "react";
 import Link from "next/link";
-import { Bell, AlertTriangle, CalendarClock, Gauge } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Bell, AlertTriangle, CalendarClock, Gauge, ShieldAlert, CheckCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Popover,
@@ -9,6 +11,9 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { useI18n } from "@/components/providers/i18n-provider";
+import { formatDate } from "@/lib/format";
+import { markNotificationsRead } from "@/app/actions/notifications";
+import type { NotificationFeedItem } from "@/lib/notifications";
 import type { DigestDTO } from "@/lib/types";
 
 export type NotificationItem = {
@@ -51,13 +56,25 @@ function DigestRow({
 export function Notifications({
   count,
   items,
+  feed,
+  unread,
   digest,
 }: {
   count: number;
   items: NotificationItem[];
+  feed: NotificationFeedItem[];
+  unread: number;
   digest: DigestDTO;
 }) {
   const { t } = useI18n();
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+
+  const markRead = () =>
+    startTransition(async () => {
+      await markNotificationsRead();
+      router.refresh();
+    });
 
   return (
     <Popover>
@@ -69,9 +86,9 @@ export function Notifications({
           aria-label={t.topbar.notifications}
         >
           <Bell className="size-5" />
-          {count > 0 && (
+          {unread > 0 && (
             <span className="absolute -top-0.5 -right-0.5 flex size-4.5 items-center justify-center rounded-full bg-warning text-[10px] font-bold text-warning-foreground">
-              {count}
+              {unread}
             </span>
           )}
         </Button>
@@ -79,10 +96,56 @@ export function Notifications({
       <PopoverContent align="end" className="w-80 p-0">
         <div className="flex items-center justify-between border-b px-4 py-3">
           <span className="text-sm font-semibold">{t.topbar.notifications}</span>
-          <span className="text-xs text-muted-foreground">
-            {count} {t.topbar.pendingApprovals.toLowerCase()}
-          </span>
+          {unread > 0 && (
+            <button
+              type="button"
+              onClick={markRead}
+              disabled={pending}
+              className="flex items-center gap-1 text-xs font-medium text-primary hover:underline disabled:opacity-50"
+            >
+              <CheckCheck className="size-3.5" />
+              {t.topbar.markAllRead}
+            </button>
+          )}
         </div>
+
+        {/* Alert feed (persistent notifications) */}
+        {feed.length > 0 && (
+          <div className="max-h-52 overflow-y-auto thin-scrollbar border-b">
+            {feed.map((n) => {
+              const inner = (
+                <div className="flex items-start gap-2">
+                  {!n.read && (
+                    <span className="mt-1.5 size-2 shrink-0 rounded-full bg-warning" />
+                  )}
+                  <ShieldAlert
+                    className={n.read ? "mt-0.5 size-4 shrink-0 text-muted-foreground" : "mt-0.5 size-4 shrink-0 text-warning"}
+                  />
+                  <div className="min-w-0 flex-1">
+                    <p className={n.read ? "text-sm text-muted-foreground" : "text-sm font-medium"}>
+                      {n.title}
+                    </p>
+                    {n.body && (
+                      <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{n.body}</p>
+                    )}
+                    <p className="mt-0.5 text-[11px] text-muted-foreground/70">
+                      {formatDate(n.createdAt)}
+                    </p>
+                  </div>
+                </div>
+              );
+              return n.link ? (
+                <Link key={n.id} href={n.link} className="block px-4 py-2.5 hover:bg-accent">
+                  {inner}
+                </Link>
+              ) : (
+                <div key={n.id} className="px-4 py-2.5">
+                  {inner}
+                </div>
+              );
+            })}
+          </div>
+        )}
 
         {/* Daily digest */}
         <div className="border-b px-2 py-2">
@@ -112,8 +175,13 @@ export function Notifications({
           />
         </div>
 
+        {items.length > 0 && (
+          <p className="px-4 pt-2 pb-1 text-xs font-medium text-muted-foreground">
+            {t.topbar.pendingApprovals} ({count})
+          </p>
+        )}
         <div className="max-h-56 overflow-y-auto thin-scrollbar">
-          {items.length === 0 ? (
+          {items.length === 0 && feed.length === 0 ? (
             <p className="px-4 py-6 text-center text-sm text-muted-foreground">
               {t.topbar.noNotifications}
             </p>
