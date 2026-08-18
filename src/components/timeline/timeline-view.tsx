@@ -1,15 +1,16 @@
 "use client";
 
-import { useMemo } from "react";
-import { GanttChartSquare } from "lucide-react";
+import { useMemo, useState } from "react";
+import { GanttChartSquare, Target, ZoomIn, ZoomOut } from "lucide-react";
 import { useI18n } from "@/components/providers/i18n-provider";
 import { cn } from "@/lib/utils";
 import { formatDate } from "@/lib/format";
+import { Button } from "@/components/ui/button";
 import type { ProjectDTO, TaskDTO } from "@/lib/types";
 
 const ROW_H = 40;
 const LABEL_W = 240;
-const PX_PER_DAY = 26;
+const ZOOM = [16, 26, 42]; // px per day: compact / normal / wide
 const AXIS_H = 34;
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -33,8 +34,17 @@ export function TimelineView({
   projects: ProjectDTO[];
 }) {
   const { t } = useI18n();
+  const [filter, setFilter] = useState(""); // "" = all projects
+  const [zoomIdx, setZoomIdx] = useState(1);
+  const pxPerDay = ZOOM[zoomIdx];
 
-  const dated = tasks.filter((x) => x.startDate || x.dueDate);
+  const dated = tasks.filter(
+    (x) => (x.startDate || x.dueDate) && (!filter || x.projectId === filter),
+  );
+  // Projects that actually have dated tasks — the only ones worth filtering by.
+  const timelineProjects = projects.filter((p) =>
+    tasks.some((tk) => tk.projectId === p.id && (tk.startDate || tk.dueDate)),
+  );
 
   const layout = useMemo(() => {
     if (dated.length === 0) return null;
@@ -56,7 +66,7 @@ export function TimelineView({
     const domainStart = minDay.getTime() - 2 * DAY;
     const domainEnd = maxDay.getTime() + 3 * DAY;
     const totalDays = Math.max(1, dayIndex(domainStart, domainEnd));
-    const width = totalDays * PX_PER_DAY;
+    const width = totalDays * pxPerDay;
 
     // Ordered rows: project header + its dated tasks.
     type Row =
@@ -91,8 +101,8 @@ export function TimelineView({
             ? +new Date(tk.startDate)
             : +new Date(tk.dueDate!) - 2 * DAY;
           const e = tk.dueDate ? +new Date(tk.dueDate) : +new Date(tk.startDate!);
-          const left = dayIndex(domainStart, s) * PX_PER_DAY;
-          const right = Math.max(left + PX_PER_DAY, dayIndex(domainStart, e) * PX_PER_DAY);
+          const left = dayIndex(domainStart, s) * pxPerDay;
+          const right = Math.max(left + pxPerDay, dayIndex(domainStart, e) * pxPerDay);
           barPos.set(tk.id, {
             top: rowIndex * ROW_H + ROW_H / 2,
             left,
@@ -107,14 +117,14 @@ export function TimelineView({
       const date = new Date(domainStart + i * DAY);
       if (date.getDay() === 1 || i === 0) {
         ticks.push({
-          x: i * PX_PER_DAY,
+          x: i * pxPerDay,
           label: `${String(date.getDate()).padStart(2, "0")}.${String(date.getMonth() + 1).padStart(2, "0")}`,
         });
       }
     }
 
     const nowMs = new Date().getTime();
-    const todayX = dayIndex(domainStart, new Date().setHours(0, 0, 0, 0)) * PX_PER_DAY;
+    const todayX = dayIndex(domainStart, new Date().setHours(0, 0, 0, 0)) * pxPerDay;
 
     // Dependency arrows (both endpoints must be visible).
     const arrows: { from: string; to: string }[] = [];
@@ -127,7 +137,7 @@ export function TimelineView({
     }
 
     return { rows, barPos, width, totalDays, ticks, todayX, arrows, nowMs };
-  }, [dated, projects]);
+  }, [dated, projects, pxPerDay]);
 
   if (!layout) {
     return (
@@ -147,6 +157,51 @@ export function TimelineView({
   return (
     <div className="space-y-5">
       <Header />
+
+      {/* Controls: project focus + zoom */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        {timelineProjects.length > 1 ? (
+          <div className="flex items-center gap-2">
+            <Target className="size-4 shrink-0 text-muted-foreground" />
+            <select
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+              className="min-w-0 max-w-64 truncate rounded-md border bg-background px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-ring"
+            >
+              <option value="">{t.ai.allProjects}</option>
+              {timelineProjects.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        ) : (
+          <span />
+        )}
+        <div className="flex items-center gap-1">
+          <Button
+            variant="outline"
+            size="icon"
+            className="size-8"
+            onClick={() => setZoomIdx((i) => Math.max(0, i - 1))}
+            disabled={zoomIdx === 0}
+            aria-label={t.timeline.zoomOut}
+          >
+            <ZoomOut className="size-4" />
+          </Button>
+          <Button
+            variant="outline"
+            size="icon"
+            className="size-8"
+            onClick={() => setZoomIdx((i) => Math.min(ZOOM.length - 1, i + 1))}
+            disabled={zoomIdx === ZOOM.length - 1}
+            aria-label={t.timeline.zoomIn}
+          >
+            <ZoomIn className="size-4" />
+          </Button>
+        </div>
+      </div>
 
       <div className="overflow-hidden rounded-xl border bg-card">
         <div className="flex">

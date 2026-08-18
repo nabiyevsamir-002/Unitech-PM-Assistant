@@ -12,6 +12,7 @@ import {
   Radar,
   Send,
   ShieldAlert,
+  GitCompare,
 } from "lucide-react";
 import { toast } from "sonner";
 import { MetricCard } from "./metric-card";
@@ -24,6 +25,7 @@ import { cn } from "@/lib/utils";
 import { runAgentScanAction } from "@/app/actions/agents";
 import { sendWeeklyReportNowAction, sendRiskAlertNowAction } from "@/app/actions/notify";
 import type { ApprovalDTO, TaskDTO } from "@/lib/types";
+import type { ProjectHealth } from "@/lib/reports/health";
 
 export function DashboardView({
   userName,
@@ -31,6 +33,7 @@ export function DashboardView({
   topApproval,
   boardTasks,
   canApprove,
+  health,
 }: {
   userName: string;
   metrics: {
@@ -42,6 +45,7 @@ export function DashboardView({
   topApproval: ApprovalDTO | null;
   boardTasks: TaskDTO[];
   canApprove: boolean;
+  health: ProjectHealth[];
 }) {
   const { t } = useI18n();
   const router = useRouter();
@@ -116,6 +120,9 @@ export function DashboardView({
           href="/approvals"
         />
       </div>
+
+      {/* Project health */}
+      <ProjectHealthSection health={health} t={t} />
 
       {/* AI suggestion */}
       <section>
@@ -196,5 +203,114 @@ export function DashboardView({
         <BoardPreview tasks={boardTasks} />
       </section>
     </div>
+  );
+}
+
+const BAND = {
+  good: { text: "text-success", bar: "bg-success", dot: "bg-success" },
+  warning: { text: "text-warning", bar: "bg-warning", dot: "bg-warning" },
+  critical: { text: "text-destructive", bar: "bg-destructive", dot: "bg-destructive" },
+} as const;
+
+function ProjectHealthSection({
+  health,
+  t,
+}: {
+  health: ProjectHealth[];
+  t: ReturnType<typeof useI18n>["t"];
+}) {
+  // Surface the projects that need attention first.
+  const sorted = [...health].sort((a, b) => a.score - b.score);
+  const good = health.filter((h) => h.band === "good").length;
+  const warning = health.filter((h) => h.band === "warning").length;
+  const critical = health.filter((h) => h.band === "critical").length;
+
+  return (
+    <section>
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <h2 className="text-base font-semibold">{t.dashboard.projectHealth}</h2>
+        <div className="flex items-center gap-4">
+          {health.length > 0 && (
+            <div className="hidden items-center gap-3 text-xs font-medium sm:flex">
+              <span className="flex items-center gap-1.5 text-success">
+                <span className="size-2 rounded-full bg-success" />
+                {good} {t.dashboard.healthHealthy}
+              </span>
+              <span className="flex items-center gap-1.5 text-warning">
+                <span className="size-2 rounded-full bg-warning" />
+                {warning} {t.dashboard.healthAttention}
+              </span>
+              <span className="flex items-center gap-1.5 text-destructive">
+                <span className="size-2 rounded-full bg-destructive" />
+                {critical} {t.dashboard.healthCritical}
+              </span>
+            </div>
+          )}
+          {health.length > 1 && (
+            <Link
+              href="/compare"
+              className="flex items-center gap-1 text-sm font-medium text-primary hover:underline"
+            >
+              <GitCompare className="size-4" />
+              {t.dashboard.compareLink}
+            </Link>
+          )}
+        </div>
+      </div>
+
+      {health.length === 0 ? (
+        <Card className="p-6 text-center text-sm text-muted-foreground">
+          {t.dashboard.healthNoProjects}
+        </Card>
+      ) : (
+        <Card className="divide-y overflow-hidden p-0">
+          {sorted.map((h) => {
+            const band = BAND[h.band];
+            return (
+              <Link
+                key={h.projectId}
+                href="/projects"
+                className="flex items-center gap-4 px-4 py-3.5 transition-colors hover:bg-accent/40"
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="mb-1.5 flex items-center justify-between gap-3">
+                    <span className="truncate text-sm font-medium">{h.name}</span>
+                    <span className={cn("shrink-0 text-sm font-semibold tabular-nums", band.text)}>
+                      {h.score}
+                    </span>
+                  </div>
+                  <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+                    <div
+                      className={cn("h-full rounded-full transition-all", band.bar)}
+                      style={{ width: `${Math.max(h.score, 3)}%` }}
+                    />
+                  </div>
+                  <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
+                    <span>
+                      {h.progress}% {t.dashboard.healthDone}
+                    </span>
+                    {h.overdueCount > 0 && (
+                      <span className="text-destructive">
+                        {h.overdueCount} {t.dashboard.overdue.toLowerCase()}
+                      </span>
+                    )}
+                    {h.budgetOverrunCount > 0 && (
+                      <span className="text-warning">
+                        {h.budgetOverrunCount} {t.dashboard.healthBudgetOver}
+                      </span>
+                    )}
+                    {h.anomalyCount > 0 && (
+                      <span className="text-warning">
+                        {h.anomalyCount} {t.dashboard.healthAnomaly}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </Link>
+            );
+          })}
+        </Card>
+      )}
+    </section>
   );
 }

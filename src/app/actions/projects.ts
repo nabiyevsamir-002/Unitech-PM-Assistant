@@ -7,7 +7,7 @@ import { prisma } from "@/lib/prisma";
 import { canApprove, CURRENCIES } from "@/lib/constants";
 import { getTemplate } from "@/lib/templates";
 
-type Result = { ok: boolean; message: string; projectId?: string };
+type Result = { ok: boolean; message: string; projectId?: string; updated?: boolean };
 
 const MS_PER_DAY = 86_400_000;
 
@@ -340,7 +340,43 @@ export async function importExcelProject(
   const projectDue = dues.length ? new Date(Math.max(...dues.map((d) => d.getTime()))) : null;
   const projectStart = starts.length ? new Date(Math.min(...starts.map((d) => d.getTime()))) : null;
 
+  // Smart update: if a project with this exact name already exists, refresh it
+  // (replace its tasks) instead of creating a duplicate — so re-uploading a newer
+  // version of the same file updates the project in place.
+  const existing = await prisma.project.findFirst({
+    where: { name: projName.trim() },
+    select: { id: true, name: true },
+  });
+
   try {
+    if (existing) {
+      await prisma.$transaction(async (tx) => {
+        await tx.task.deleteMany({ where: { projectId: existing.id } });
+        await tx.task.createMany({
+          data: taskData.map((t) => ({ ...t, projectId: existing.id })),
+        });
+        await tx.project.update({
+          where: { id: existing.id },
+          data: { startDate: projectStart, dueDate: projectDue },
+        });
+      });
+      await prisma.auditLog.create({
+        data: {
+          actor: `user:${guard.session.user.id}`,
+          action: "PROJECT_UPDATED",
+          entity: `project:${existing.id}`,
+          after: JSON.stringify({ name: existing.name, source: "excel-import", taskCount: taskData.length }),
+        },
+      });
+      revalidateProjectViews();
+      return {
+        ok: true,
+        message: `«${existing.name}» yeniləndi (${taskData.length} tapşırıq).`,
+        projectId: existing.id,
+        updated: true,
+      };
+    }
+
     const project = await prisma.$transaction(async (tx) => {
       const created = await tx.project.create({
         data: {
@@ -371,6 +407,7 @@ export async function importExcelProject(
       ok: true,
       message: `«${project.name}» import edildi (${taskData.length} tapşırıq).`,
       projectId: project.id,
+      updated: false,
     };
   } catch {
     return { ok: false, message: "İdxal zamanı xəta baş verdi. Bir azdan yenidən cəhd edin." };
